@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>QDII 基金罗盘</title>
+    <link rel="stylesheet" href="/styles.css?v=20260516-history-layout" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">QDII Fund Compass</p>
+        <h1>QDII 基金罗盘</h1>
+      </div>
+      <div class="top-actions">
+        <span id="favOnlyToggle" class="chip toggle hidden">
+          <input type="checkbox" id="favOnlyCheckbox" />
+          只看自选
+        </span>
+        <button id="openChatBtn" class="button primary" type="button">AI 投顾</button>
+        <button id="clearCompareBtn" class="button" type="button">清空对比</button>
+        <div id="authArea" class="auth-area">
+          <button id="loginBtn" class="button" type="button">登录</button>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="summary-grid" aria-label="市场总览">
+        <div class="summary">
+          <span>基金数量</span>
+          <strong id="totalFunds">--</strong>
+        </div>
+        <div class="summary">
+          <span>晨星 4+ 星</span>
+          <strong id="highScoreFunds">--</strong>
+        </div>
+        <div class="summary">
+          <span>科技成长占比</span>
+          <strong id="techRatio">--</strong>
+        </div>
+        <div class="summary">
+          <span>更新时间</span>
+          <strong id="dataTime">--</strong>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="filters">
+          <label class="search">
+            <span>搜索</span>
+            <input id="searchInput" type="search" placeholder="基金名称 / 代码 / 主题" />
+          </label>
+          <label>
+            <span>区域</span>
+            <select id="regionFilter"></select>
+          </label>
+          <label>
+            <span>主题</span>
+            <select id="themeFilter"></select>
+          </label>
+          <label>
+            <span>用途</span>
+            <select id="roleFilter"></select>
+          </label>
+          <label>
+            <span>排序</span>
+            <select id="sortSelect">
+              <option value="ratingMorningstar">晨星评级</option>
+              <option value="sharpe1y">夏普比率</option>
+              <option value="aumBillion">基金规模</option>
+              <option value="return1y">近1年收益</option>
+              <option value="return6m">近6月收益</option>
+              <option value="return3m">近3月收益</option>
+              <option value="returnYtd">今年以来</option>
+              <option value="code">基金代码</option>
+            </select>
+          </label>
+        </div>
+        <div class="quick-chip-row" id="quickChipRow" aria-label="快速筛选标签"></div>
+        <div class="hint" id="statusText">正在加载 QDII 基金数据...</div>
+      </section>
+
+      <section id="comparePanel" class="compare-panel hidden" aria-label="基金对比">
+        <div class="section-title">
+          <h2>已选对比</h2>
+          <span id="compareCount">0/6</span>
+        </div>
+        <div class="compare-table-wrap">
+          <table class="compare-table">
+            <thead>
+              <tr>
+                <th>基金</th>
+                <th>用途</th>
+                <th>近3月</th>
+                <th>近1年</th>
+                <th>今年以来</th>
+                <th>晨星</th>
+                <th>风险</th>
+              </tr>
+            </thead>
+            <tbody id="compareBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="fund-section">
+        <div class="section-title">
+          <h2>QDII 全列表</h2>
+          <div class="seg-filter" id="purchaseFilter" role="group" aria-label="申购状态筛选">
+            <span class="seg-filter__label">申购状态</span>
+            <button type="button" class="seg-btn" data-purchase="可申购">可申购</button>
+            <button type="button" class="seg-btn" data-purchase="暂停申购">暂停申购</button>
+          </div>
+        </div>
+        <div id="fundGrid" class="fund-grid"></div>
+        <div id="loadMoreSentinel" class="load-more hidden" aria-live="polite"></div>
+      </section>
+    </main>
+
+    <aside id="drawer" class="drawer" aria-hidden="true">
+      <div class="drawer-card">
+        <button id="closeDrawerBtn" class="icon-button" type="button" aria-label="关闭">×</button>
+        <div id="drawerContent"></div>
+      </div>
+    </aside>
+
+    <aside id="chatPanel" class="chat-panel" aria-hidden="true">
+      <header class="chat-panel__head">
+        <div>
+          <p class="eyebrow">AI 投顾</p>
+          <h2>问问基金</h2>
+        </div>
+        <div class="chat-panel__head-actions">
+          <button id="chatHistoryBtn" class="button small" type="button" title="会话历史">历史</button>
+          <button id="chatResetBtn" class="button small" type="button" title="开始新会话">新会话</button>
+          <button id="closeChatBtn" class="icon-button" type="button" aria-label="关闭">×</button>
+        </div>
+      </header>
+      <div id="chatMessages" class="chat-messages" aria-live="polite"></div>
+      <div id="chatHistoryPanel" class="chat-history" hidden>
+        <div class="chat-history__head">
+          <span>会话历史</span>
+          <button id="chatHistoryBack" class="button small" type="button">返回当前对话</button>
+        </div>
+        <ul id="chatHistoryList" class="chat-history__list"></ul>
+        <p id="chatHistoryEmpty" class="chat-history__empty" hidden>还没有历史会话</p>
+      </div>
+      <footer class="chat-panel__foot">
+        <div id="chatAttach" class="chat-attach" hidden></div>
+        <form id="chatForm" class="chat-form" autocomplete="off">
+          <textarea id="chatInput" rows="1" placeholder="输入你的问题" maxlength="500"></textarea>
+          <button id="chatSubmit" type="submit" class="chat-submit-btn" aria-label="发送">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+          </button>
+        </form>
+        <p class="chat-disclaimer">本工具非投资建议，数据可能有延迟，决策请以基金公告为准。</p>
+      </footer>
+    </aside>
+
+    <div id="authModal" class="modal" aria-hidden="true">
+      <div class="modal-card">
+        <button id="closeAuthBtn" class="icon-button" type="button" aria-label="关闭">×</button>
+        <h2 id="authTitle">登录</h2>
+        <p class="hint" id="authHint">登录后即可收藏感兴趣的基金。</p>
+        <form id="authForm" class="auth-form">
+          <label>
+            <span>邮箱</span>
+            <input id="authEmail" type="email" autocomplete="email" required />
+          </label>
+          <label>
+            <span>密码（至少 6 位）</span>
+            <input id="authPassword" type="password" autocomplete="current-password" minlength="6" required />
+          </label>
+          <p id="authError" class="auth-error hidden"></p>
+          <button id="authSubmit" type="submit" class="button primary">登录</button>
+        </form>
+        <p class="auth-switch">
+          <span id="authSwitchText">还没有账号？</span>
+          <a href="#" id="authSwitchLink">注册一个</a>
+        </p>
+      </div>
+    </div>
+
+    <script src="/app.js" type="module"></script>
+    <script src="/chat.js?v=20260516-history-layout" type="module"></script>
+  </body>
+</html>

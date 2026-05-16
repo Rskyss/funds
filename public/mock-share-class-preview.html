@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>份额说明 · 聊天卡片样式预览</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <style>
+    body {
+      padding: 24px 20px 48px;
+      max-width: 920px;
+      margin: 0 auto;
+    }
+
+    .preview-page__title {
+      margin: 0 0 8px;
+      font-size: 22px;
+      color: var(--ink);
+    }
+
+    .preview-page__sub {
+      margin: 0 0 28px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .preview-scheme {
+      padding: 20px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .preview-scheme__label {
+      display: inline-block;
+      margin: 0 0 4px;
+      padding: 4px 10px;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--blue);
+      background: #eff6ff;
+      border-radius: 6px;
+    }
+
+    .preview-scheme__desc {
+      margin: 0 0 16px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .preview-chat {
+      max-width: 420px;
+      margin: 0 auto;
+    }
+
+    .chat-bubble--assistant {
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: var(--surface-2);
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    .chat-bubble--assistant p {
+      margin: 0 0 8px;
+    }
+
+    /* 方案 A：双卡 + 说明条 */
+    .chat-share-notice {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      margin: 12px 0 8px;
+      padding: 10px 12px;
+      font-size: 12px;
+      line-height: 1.5;
+      color: #92400e;
+      background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+      border: 1px solid #fcd34d;
+      border-radius: 10px;
+    }
+
+    .chat-share-notice__icon {
+      flex-shrink: 0;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+
+    .chat-share-notice strong {
+      color: #b45309;
+      font-weight: 600;
+    }
+
+    .chat-card--alt-share {
+      opacity: 0.92;
+      border-style: dashed;
+      border-color: #cbd5e1;
+      background: #fafafa;
+    }
+
+    .chat-card--alt-share:hover {
+      border-color: var(--amber);
+      box-shadow: 0 4px 12px rgba(217, 119, 6, 0.08);
+    }
+
+    .chat-card--alt-share .chat-card__head strong {
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    /* 方案 B：单卡 + 备注 */
+    .chat-card__footnote {
+      margin: 8px 0 0;
+      padding-top: 8px;
+      border-top: 1px dashed var(--line);
+      font-size: 11px;
+      line-height: 1.45;
+      color: var(--muted);
+      text-align: left;
+    }
+
+    .chat-card__footnote button.linkish {
+      padding: 0;
+      border: none;
+      background: none;
+      font: inherit;
+      color: var(--blue);
+      cursor: pointer;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+
+    /* 可购状态（通用） */
+    .chat-card__status {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      margin-bottom: 6px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .chat-card__status--limit { color: var(--amber); }
+    .chat-card__status--unavail { color: var(--red); }
+
+    .chat-card__status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .preview-compare {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    @media (max-width: 720px) {
+      .preview-compare {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1 class="preview-page__title">同基金多份额 · 聊天卡片样式预览</h1>
+  <p class="preview-page__sub">
+    本地预览：<code>http://localhost:5173/mock-share-class-preview.html</code>（需先 <code>npm start</code>）
+  </p>
+
+  <div class="preview-compare">
+    <section class="preview-scheme">
+      <span class="preview-scheme__label">方案 A · 双卡 + 说明条</span>
+      <p class="preview-scheme__desc">主推 006373；006374 前加黄色说明条，次卡虚线边框弱化。</p>
+      <div class="preview-chat">
+        <div class="chat-bubble--assistant chat-reply">
+          <p>按披露的前十大重仓，以下 QDII 持有美光（MU）相关敞口（截至 2025-12-31，仅供参考）：</p>
+          <p>・<strong>国富全球科技互联 人民币 A</strong>（<code>006373</code>）— MU 占 7.69%</p>
+
+          <button type="button" class="chat-card">
+            <div class="chat-card__status chat-card__status--limit">
+              <span class="chat-card__status-dot"></span> 限购 100元/日
+            </div>
+            <div class="chat-card__head">
+              <strong>国富全球科技互联混合(QDII)人民币A</strong>
+              <span>006373</span>
+            </div>
+            <div class="chat-card__chips">
+              <span>全球</span><span>科技成长</span><span>进攻仓</span>
+            </div>
+            <div class="chat-card__metrics">
+              <div><span>近3月</span><strong class="up">+26.50%</strong></div>
+              <div><span>近1年</span><strong class="up">+118.36%</strong></div>
+              <div><span>今年</span><strong class="up">+44.52%</strong></div>
+              <div><span>观察分</span><strong>72</strong></div>
+            </div>
+          </button>
+
+          <div class="chat-share-notice" role="note">
+            <span class="chat-share-notice__icon" aria-hidden="true">ℹ️</span>
+            <div>
+              <strong>以下为同基金的美元现汇份额</strong>，与上一张持仓相同，不是另一只不同的基金。
+              多数平台（微众、支付宝等）<strong>暂不销售</strong>；有美元现汇账户需求再查看。
+            </div>
+          </div>
+
+          <button type="button" class="chat-card chat-card--alt-share">
+            <div class="chat-card__status chat-card__status--unavail">
+              <span class="chat-card__status-dot"></span> 多数渠道不可购
+            </div>
+            <div class="chat-card__head">
+              <strong>国富全球科技互联混合(QDII)美元现汇A</strong>
+              <span>006374</span>
+            </div>
+            <div class="chat-card__chips">
+              <span>全球</span><span>科技成长</span><span>进攻仓</span>
+            </div>
+            <div class="chat-card__metrics">
+              <div><span>近3月</span><strong class="up">+26.50%</strong></div>
+              <div><span>近1年</span><strong class="up">+118.36%</strong></div>
+              <div><span>今年</span><strong class="up">+44.52%</strong></div>
+              <div><span>观察分</span><strong>72</strong></div>
+            </div>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <section class="preview-scheme">
+      <span class="preview-scheme__label">方案 B · 单卡 + 备注</span>
+      <p class="preview-scheme__desc">列表只展示 006373；美元份额收在卡片底部一行备注。</p>
+      <div class="preview-chat">
+        <div class="chat-bubble--assistant chat-reply">
+          <p>按披露的前十大重仓，以下 QDII 持有美光（MU）相关敞口（截至 2025-12-31，仅供参考）：</p>
+          <p>・<strong>国富全球科技互联 人民币 A</strong>（<code>006373</code>）— MU 占 7.69%</p>
+
+          <button type="button" class="chat-card">
+            <div class="chat-card__status chat-card__status--limit">
+              <span class="chat-card__status-dot"></span> 限购 100元/日
+            </div>
+            <div class="chat-card__head">
+              <strong>国富全球科技互联混合(QDII)人民币A</strong>
+              <span>006373</span>
+            </div>
+            <div class="chat-card__chips">
+              <span>全球</span><span>科技成长</span><span>进攻仓</span>
+            </div>
+            <div class="chat-card__metrics">
+              <div><span>近3月</span><strong class="up">+26.50%</strong></div>
+              <div><span>近1年</span><strong class="up">+118.36%</strong></div>
+              <div><span>今年</span><strong class="up">+44.52%</strong></div>
+              <div><span>观察分</span><strong>72</strong></div>
+            </div>
+            <p class="chat-card__footnote">
+              同基金另有美元现汇份额 <button type="button" class="linkish">006374</button>，持仓相同；
+              多数 App 不代销。普通人民币申购看本卡即可。
+            </p>
+          </button>
+
+          <p style="margin-top:12px;font-size:13px;color:var(--muted);">・鹏华 …（其余命中基金继续单列，此处省略）</p>
+        </div>
+      </div>
+    </section>
+  </div>
+</body>
+</html>

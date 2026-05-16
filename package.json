@@ -1,0 +1,21 @@
+{
+  "name": "qdii-fund-compass",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file=.env server.mjs",
+    "ai:generate": "node --env-file=.env scripts/generate-summaries.mjs",
+    "data:f10": "node --env-file=.env scripts/backfill-fund-details.mjs",
+    "data:metrics": "node --env-file=.env scripts/backfill-metrics.mjs",
+    "data:holdings": "node --env-file=.env scripts/backfill-holdings.mjs",
+    "data:managers": "node --env-file=.env scripts/backfill-managers.mjs",
+    "data:fees": "node --env-file=.env scripts/backfill-fees.mjs",
+    "data:refresh": "node --env-file=.env scripts/scheduled-refresh.mjs",
+    "data:embed": "node --env-file=.env scripts/embed-fund-docs.mjs",
+    "agent:test": "node --env-file=.env scripts/test-agent-cases.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0"
+  }
+}
