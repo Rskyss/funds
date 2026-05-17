@@ -70,6 +70,8 @@ const els = {
   authForm: $("authForm"),
   authEmail: $("authEmail"),
   authPassword: $("authPassword"),
+  authInvite: $("authInvite"),
+  authInviteRow: $("authInviteRow"),
   authSubmit: $("authSubmit"),
   authError: $("authError"),
   authTitle: $("authTitle"),
@@ -570,6 +572,9 @@ function fundCard(fund, index = 0) {
           <div class="code">${fund.code} · ${fund.date || "无净值日期"} · 成立 ${fund.inception || "--"}</div>
         </div>
         <div class="card-head-actions">
+          <button class="card-ask-btn" type="button" data-ask="${fund.code}" title="就这只基金向 AI 投顾提问" aria-label="向 AI 提问">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          </button>
           <button class="fav-btn ${isFav ? "active" : ""}" type="button" data-fav="${fund.code}" title="${favTitle}" aria-label="${favTitle}">${favLabel}</button>
         </div>
       </div>
@@ -1234,14 +1239,16 @@ function openAuthModal(mode = "login") {
   els.authForm.reset();
   if (mode === "login") {
     els.authTitle.textContent = "登录";
-    els.authHint.textContent = "登录后即可收藏感兴趣的基金。";
+    els.authHint.textContent = "登录后即可使用 AI 投顾、收藏和基金对比。";
     els.authSubmit.textContent = "登录";
     els.authSwitchText.textContent = "还没有账号？";
     els.authSwitchLink.textContent = "注册一个";
+    els.authInviteRow.classList.add("hidden");
   } else {
     els.authTitle.textContent = "注册";
-    els.authHint.textContent = "注册一个新账号（本地测试，邮箱不会发送验证邮件）。";
+    els.authHint.textContent = "注册需要邀请码，邮箱不会发送验证邮件。";
     els.authSubmit.textContent = "注册并登录";
+    els.authInviteRow.classList.remove("hidden");
     els.authSwitchText.textContent = "已有账号？";
     els.authSwitchLink.textContent = "直接登录";
   }
@@ -1264,7 +1271,8 @@ async function openProfileModal() {
 
   const REGIONS = ["美国", "欧洲", "日本", "印度", "港股", "亚太/新兴", "全球"];
   const currentRegions = new Set(Array.isArray(current.regions) ? current.regions : []);
-  const opt = (val, label, group) => `<label class="profile-opt"><input type="${group === 'regions' ? 'checkbox' : 'radio'}" name="${group}" value="${val}" ${group === 'regions' ? (currentRegions.has(val) ? 'checked' : '') : (current[group === 'riskPref' ? 'risk_pref' : group === 'amountBand' ? 'amount_band' : group] === val ? 'checked' : '')}><span>${label}</span></label>`;
+  const colMap = { riskPref: 'risk_pref', amountBand: 'amount_band', fundYears: 'fund_years' };
+  const opt = (val, label, group) => `<label class="profile-opt"><input type="${group === 'regions' ? 'checkbox' : 'radio'}" name="${group}" value="${val}" ${group === 'regions' ? (currentRegions.has(val) ? 'checked' : '') : (current[colMap[group] || group] === val ? 'checked' : '')}><span>${label}</span></label>`;
 
   const wrap = document.createElement("div");
   wrap.className = "modal";
@@ -1272,8 +1280,8 @@ async function openProfileModal() {
   wrap.innerHTML = `
     <div class="modal-card">
       <button class="icon-button" type="button" data-close>×</button>
-      <h3>偏好设置（4 题，可跳过）</h3>
-      <p class="muted">这些偏好会作为软约束，影响 AI 投顾的筛选/排序，不会影响你点开看任何基金。</p>
+      <h3>偏好设置（5 题，可跳过）</h3>
+      <p class="muted">这些偏好会影响 AI 投顾帮你筛选/排序基金，也会让它的回答更贴合你的经验和风险偏好，不会影响你点开看任何基金。</p>
       <form id="profileForm" class="profile-form">
         <fieldset><legend>1. 风险偏好</legend>
           ${opt("low", "保守（中低波动优先）", "riskPref")}
@@ -1293,6 +1301,13 @@ async function openProfileModal() {
           ${opt("10-50w", "10-50 万", "amountBand")}
           ${opt("50-200w", "50-200 万", "amountBand")}
           ${opt(">200w", "200 万以上", "amountBand")}
+        </fieldset>
+        <fieldset><legend>5. 投资基金年限</legend>
+          ${opt("none", "没买过基金", "fundYears")}
+          ${opt("lt1", "1 年以内", "fundYears")}
+          ${opt("1to3", "1-3 年", "fundYears")}
+          ${opt("3to5", "3-5 年", "fundYears")}
+          ${opt("gt5", "5 年以上", "fundYears")}
         </fieldset>
         <div class="modal-actions">
           <button type="button" class="button" data-close>取消</button>
@@ -1315,6 +1330,7 @@ async function openProfileModal() {
       riskPref: fd.get("riskPref") || null,
       horizon: fd.get("horizon") || null,
       amountBand: fd.get("amountBand") || null,
+      fundYears: fd.get("fundYears") || null,
       regions,
     };
     const errEl = wrap.querySelector(".profile-error");
@@ -1419,6 +1435,13 @@ els.favOnlyCheckbox.addEventListener("change", (event) => {
 els.fundGrid.addEventListener("change", (event) => {
   const code = event.target?.dataset?.compare;
   if (!code) return;
+  if (!getSession()) {
+    event.target.checked = false;
+    const toggle = event.target.closest(".compare-toggle");
+    if (toggle) toggle.classList.remove("is-on");
+    openAuthModal("login");
+    return;
+  }
   const fund = state.funds.find((item) => item.code === code);
   if (!fund) return;
   if (event.target.checked) {
@@ -1436,6 +1459,12 @@ els.fundGrid.addEventListener("change", (event) => {
 });
 
 els.fundGrid.addEventListener("click", (event) => {
+  const askBtn = event.target.closest?.("[data-ask]");
+  if (askBtn) {
+    event.stopPropagation();
+    window.qdiiCompass?.askAboutFund?.(askBtn.dataset.ask);
+    return;
+  }
   const detailCode = event.target?.dataset?.detail;
   if (detailCode) {
     showDetail(detailCode);
@@ -1513,13 +1542,14 @@ els.authForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const email = els.authEmail.value.trim();
   const password = els.authPassword.value;
+  const inviteCode = els.authInvite.value.trim();
   els.authSubmit.disabled = true;
   els.authError.classList.add("hidden");
   try {
     if (authMode === "login") {
       await signIn(email, password);
     } else {
-      await signUp(email, password);
+      await signUp(email, password, inviteCode);
     }
     closeAuthModal();
   } catch (error) {
@@ -1555,5 +1585,7 @@ window.qdiiCompass.showChatDetail = (code) => {
 window.qdiiCompass.closeDrawer = closeDrawer;
 window.qdiiCompass.getFund = (code) => state.funds.find((f) => f.code === code) || null;
 window.qdiiCompass.getAccessToken = () => getToken();
+window.qdiiCompass.isLoggedIn = () => !!getSession();
+window.qdiiCompass.requireLogin = () => openAuthModal("login");
 
 loadFunds();

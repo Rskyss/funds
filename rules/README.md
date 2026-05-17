@@ -8,12 +8,14 @@
 |---|---|---|
 | `compliance.md` | 红线话术、免责边界、最高优先级 | 注入 `lib/agent/prompts.mjs` 的 SYNTH_SYSTEM |
 | `individuality.md` | 投顾口吻、立场、开场多变 | 同上（合成层 system 前置） |
+| `persona.md` | 千人千面：按用户画像（经验/风险/持有期/区域/金额）调表达深浅与建议倾向 | `lib/agent/prompts.mjs` 的 `buildPersonaDirective()`，注入合成层 system；画像取值由代码当数据塞入 |
 | `inquire.md` | 需求模糊时如何反问（KYC 式） | 规划/合成层，filter 意图缺画像时 |
 | `filter.md` | 模糊需求 → 结构化筛选条件 | `lib/agent/prompts.mjs` 的 PLANNER_SYSTEM |
 | `compare.md` | 多只基金对比维度与结论 | 合成层，compare 意图 |
 | `concept.md` | 术语讲人话 | 合成层，concept 意图 |
 | `event.md` | 行情/原因解读、来源引用 | 合成层，event 意图 |
 | `card_blurb.md` | 列表一句话点评风格 | `lib/ai.mjs` 的 SYSTEM_PROMPT |
+| `suggestions.md` | 聊天框推荐问题（通用 + 指定基金） | `lib/agent/rules.mjs` 的 `suggestionTemplates()` |
 
 ## 设计依据（业界做法）
 - 合规独立成卡、优先级最高：对应"独立合规校验层"实践
@@ -24,7 +26,8 @@
 ## 接入方式（已实施）
 
 - 加载器：[`lib/agent/rules.mjs`](../lib/agent/rules.mjs) — 按文件名读卡、进程内缓存；改卡片后需 **重启 `npm start`**。
-- 拼装：[`lib/agent/prompts.mjs`](../lib/agent/prompts.mjs) — 规划层引用 `filter` 卡；合成层引用 `compliance` / `individuality` / `inquire` / `compare` / `concept` / `event`。
-- 列表一句话点评：[`lib/ai.mjs`](../lib/ai.mjs) 仍用内置 `SYSTEM_PROMPT`；`card_blurb.md` 供后续对齐风格时接入。
+- 拼装：[`lib/agent/prompts.mjs`](../lib/agent/prompts.mjs) — 规划层引用 `filter` 卡；合成层引用 `compliance` / `individuality` / `inquire` / `compare` / `concept` / `event`，并由 `buildPersonaDirective()` 追加 `persona` 卡（卡片是策略，用户画像取值由代码当数据塞入）。
+- 列表一句话点评：[`lib/ai.mjs`](../lib/ai.mjs) 的 `SYSTEM_PROMPT` 直接读 `card_blurb.md`。
+- 聊天推荐问题：`suggestionTemplates()` 解析 `suggestions.md`。
 
 架构总图见 [`docs/ai-agent/ARCHITECTURE.md`](../docs/ai-agent/ARCHITECTURE.md)。

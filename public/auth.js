@@ -55,11 +55,11 @@ export async function init() {
   return supabase;
 }
 
-export async function signUp(email, password) {
+export async function signUp(email, password, inviteCode) {
   const res = await fetch("/api/auth/signup", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email, password, inviteCode }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "注册失败");

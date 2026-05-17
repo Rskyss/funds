@@ -1187,7 +1187,9 @@ td.num {
   box-shadow: -8px 0 30px rgba(0, 0, 0, 0.1);
   overflow-y: auto;
   transform: translateX(100%);
-  transition: transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 300ms cubic-bezier(0.16, 1, 0.3, 1),
+              margin-right 300ms cubic-bezier(0.16, 1, 0.3, 1),
+              width 300ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .drawer-card h2 {
@@ -1793,6 +1795,29 @@ td.num {
   background: #fff7d6;
   border-color: var(--amber);
   color: var(--amber);
+}
+
+.card-ask-btn {
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+}
+
+.card-ask-btn:hover {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+
+.card-ask-btn svg {
+  pointer-events: none;
 }
 
 .modal {
@@ -2751,7 +2776,23 @@ td.num {
 }
 
 .profile-opt input {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border-radius: 50%;
+  box-shadow: none;
   accent-color: var(--blue);
+}
+
+.profile-opt input[type="checkbox"] {
+  border-radius: 4px;
+}
+
+.profile-opt span {
+  white-space: nowrap;
 }
 
 .profile-regions {

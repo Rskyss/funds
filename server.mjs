@@ -40,6 +40,10 @@ import {
   saveAiSummary,
   getUserProfile,
   saveUserProfile,
+  findInviteCode,
+  claimInviteCode,
+  releaseInviteCode,
+  attachInviteCodeUser,
 } from "./lib/store.mjs";
 import { generateWithRetry } from "./lib/ai.mjs";
 import { publicConfig, supabaseAdmin } from "./lib/supabase.mjs";
@@ -49,6 +53,7 @@ import { runPlan } from "./lib/agent/tools.mjs";
 import { synthesize, synthesizeStream, pickCards } from "./lib/agent/synth.mjs";
 import { loadSession, saveSession, appendTurn, updateLast, randomUUID } from "./lib/agent/session.mjs";
 import { logChatTurn, rateLimit } from "./lib/agent/metrics.mjs";
+import { suggestionTemplates } from "./lib/agent/rules.mjs";
 import { formatDataUpdateDisplay } from "./lib/dataSchedule.mjs";
 
 const PORT = Number(process.env.PORT || 5173);
@@ -402,6 +407,11 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    if (url.pathname === "/api/chat/suggestions" && req.method === "GET") {
+      json(res, 200, suggestionTemplates());
+      return;
+    }
+
     if (url.pathname === "/api/funds" && req.method === "GET") {
       const refresh = url.searchParams.get("refresh") === "1";
       const snapshot = await loadOrRefresh(refresh);
@@ -522,16 +532,19 @@ const server = createServer(async (req, res) => {
       const RISK = ["low", "mid", "high"];
       const HORIZON = ["short", "mid", "long"];
       const AMOUNT = ["<10w", "10-50w", "50-200w", ">200w"];
+      const FUND_YEARS = ["none", "lt1", "1to3", "3to5", "gt5"];
       const REGIONS = ["美国", "欧洲", "日本", "印度", "港股", "亚太/新兴", "全球"];
       if (body.riskPref && !RISK.includes(body.riskPref)) { json(res, 400, { error: "riskPref 不合法" }); return; }
       if (body.horizon && !HORIZON.includes(body.horizon)) { json(res, 400, { error: "horizon 不合法" }); return; }
       if (body.amountBand && !AMOUNT.includes(body.amountBand)) { json(res, 400, { error: "amountBand 不合法" }); return; }
+      if (body.fundYears && !FUND_YEARS.includes(body.fundYears)) { json(res, 400, { error: "fundYears 不合法" }); return; }
       const regions = Array.isArray(body.regions) ? body.regions.filter((r) => REGIONS.includes(r)) : [];
       const saved = await saveUserProfile(tokenUser.userId, {
         riskPref: body.riskPref || null,
         horizon: body.horizon || null,
         regions,
         amountBand: body.amountBand || null,
+        fundYears: body.fundYears || null,
       });
       json(res, 200, { profile: saved });
       return;
@@ -608,6 +621,7 @@ const server = createServer(async (req, res) => {
             user: userMessage,
             history,
             state,
+            profile: userProfile,
             onDelta: (delta) => send("delta", { text: delta }),
           });
           if (!synth.ok) {
@@ -673,7 +687,7 @@ const server = createServer(async (req, res) => {
       });
 
       const state = await runPlan(planResult);
-      let synth = await synthesize({ user: userMessage, history, state });
+      let synth = await synthesize({ user: userMessage, history, state, profile: userProfile });
       if (!synth.ok) {
         synth = {
           ...synth,
@@ -741,6 +755,7 @@ const server = createServer(async (req, res) => {
       const body = await readBody(req);
       const email = (body.email || "").trim().toLowerCase();
       const password = body.password || "";
+      const inviteCode = (body.inviteCode || "").trim();
       if (!email || !email.includes("@")) {
         json(res, 400, { error: "邮箱格式不正确" });
         return;
@@ -749,18 +764,43 @@ const server = createServer(async (req, res) => {
         json(res, 400, { error: "密码至少 6 位" });
         return;
       }
+      if (!inviteCode) {
+        json(res, 400, { error: "请输入邀请码" });
+        return;
+      }
+      const invite = await findInviteCode(inviteCode);
+      if (!invite) {
+        json(res, 400, { error: "邀请码无效" });
+        return;
+      }
+      if (invite.status !== "unused") {
+        json(res, 400, { error: "邀请码已被使用" });
+        return;
+      }
+      if (invite.expires_at && new Date(invite.expires_at) < new Date()) {
+        json(res, 400, { error: "邀请码已过期" });
+        return;
+      }
+      const claimed = await claimInviteCode(inviteCode);
+      if (!claimed) {
+        json(res, 400, { error: "邀请码已被使用" });
+        return;
+      }
       const { data, error } = await supabaseAdmin.auth.admin.createUser({
         email,
         password,
         email_confirm: true,
       });
       if (error) {
+        await releaseInviteCode(inviteCode);
         const msg = error.message || "注册失败";
         const code = msg.includes("already") || msg.includes("registered") ? 409 : 400;
         json(res, code, { error: msg.includes("already") ? "该邮箱已注册" : msg });
         return;
       }
-      json(res, 200, { ok: true, userId: data?.user?.id || null });
+      const newUserId = data?.user?.id || null;
+      if (newUserId) await attachInviteCodeUser(inviteCode, newUserId);
+      json(res, 200, { ok: true, userId: newUserId });
       return;
     }
 

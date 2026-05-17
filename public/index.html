@@ -172,6 +172,10 @@
             <span>密码（至少 6 位）</span>
             <input id="authPassword" type="password" autocomplete="current-password" minlength="6" required />
           </label>
+          <label id="authInviteRow" class="hidden">
+            <span>邀请码</span>
+            <input id="authInvite" type="text" autocomplete="off" placeholder="请输入邀请码" />
+          </label>
           <p id="authError" class="auth-error hidden"></p>
           <button id="authSubmit" type="submit" class="button primary">登录</button>
         </form>

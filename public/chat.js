@@ -4,38 +4,72 @@ const SESSIONS_INDEX_KEY = "qdii-compass-chat-sessions-index";
 const HISTORY_MAX_TURNS = 20;
 const SESSIONS_MAX = 50;
 
-const RECOMMENDED_QUESTIONS = {
-  filter: [
-    "找几只欧洲底仓基金，按观察分排序",
-    "近 1 年涨幅最高的纳指基金",
-    "申购费打折后最低的 5 只 QDII",
-    "成立满 3 年的港股科技基金",
-    "晨星 4 星以上的美国主动基金",
-    "规模超过 30 亿的大盘宽基 QDII",
-  ],
-  compare: [
-    "000614 和 513030 哪个更值得长期持有",
-    "纳指 ETF 里挑 3 只对比一下",
-  ],
-  concept: [
-    "QDII 限购是怎么回事",
-    "跟踪误差是什么意思",
-    "场内 ETF 溢价有什么风险",
-    "夏普比率和最大回撤怎么看",
-  ],
-  event: [
-    "最近美元兑人民币走势对纳指基金有啥影响",
-    "纳指最近为什么跌",
-    "美联储加息会怎么影响 QDII",
-    "印度市场最近怎么样",
-  ],
-};
+// 推荐问题话术不写在代码里：模板维护在 rules/suggestions.md，服务端解析后由本接口下发。
+// 代码只负责抽取与占位符替换这类逻辑。
+let suggestionTpl = null;
+let suggestionTplPromise = null;
 
-function pickRandomSuggestions(count = 6) {
-  const groups = Object.values(RECOMMENDED_QUESTIONS);
+async function loadSuggestionTemplates() {
+  if (suggestionTpl) return suggestionTpl;
+  if (!suggestionTplPromise) {
+    suggestionTplPromise = fetch("/api/chat/suggestions")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        suggestionTpl = {
+          genericGroups: data && Array.isArray(data.genericGroups) ? data.genericGroups : [],
+          fund: data && Array.isArray(data.fund) ? data.fund : [],
+        };
+        return suggestionTpl;
+      })
+      .catch(() => {
+        suggestionTpl = { genericGroups: [], fund: [] };
+        return suggestionTpl;
+      });
+  }
+  return suggestionTplPromise;
+}
+
+function fundPlaceholderValue(fund, key) {
+  switch (key) {
+    case "drawdown":
+      return fund.maxDrawdown1y !== null && fund.maxDrawdown1y !== undefined
+        ? `${Number(fund.maxDrawdown1y).toFixed(1)}%`
+        : null;
+    case "sharpe":
+      return fund.sharpe1y !== null && fund.sharpe1y !== undefined
+        ? Number(fund.sharpe1y).toFixed(2)
+        : null;
+    case "rating":
+      return fund.ratingMorningstar ? String(fund.ratingMorningstar) : null;
+    case "peer":
+      return fund.theme || fund.region || null;
+    default:
+      return null;
+  }
+}
+
+function fundSuggestions(fund, tpl) {
+  const templates = (tpl && tpl.fund) || [];
+  const out = [];
+  for (const t of templates) {
+    const keys = [...t.matchAll(/\{(\w+)\}/g)].map((m) => m[1]);
+    let q = t;
+    let skip = false;
+    for (const k of keys) {
+      const v = fundPlaceholderValue(fund, k);
+      if (v == null) { skip = true; break; }
+      q = q.split(`{${k}}`).join(v);
+    }
+    if (!skip && !out.includes(q)) out.push(q);
+    if (out.length >= 6) break;
+  }
+  return out;
+}
+
+function pickRandomSuggestions(groups, count = 6) {
   const picked = [];
   for (const g of groups) {
-    picked.push(g[Math.floor(Math.random() * g.length)]);
+    if (g.length) picked.push(g[Math.floor(Math.random() * g.length)]);
   }
   const pool = groups.flat().filter((q) => !picked.includes(q));
   for (let i = pool.length - 1; i > 0; i--) {
@@ -294,6 +328,10 @@ async function deleteSession(targetSid) {
 }
 
 async function openChat(opts = {}) {
+  if (!window.qdiiCompass?.isLoggedIn?.()) {
+    window.qdiiCompass?.requireLogin?.();
+    return;
+  }
   const drawer = document.getElementById("drawer");
   if (!opts.keepDrawer && drawer && drawer.getAttribute("aria-hidden") === "false" && !drawer.classList.contains("drawer--from-chat")) {
     drawer.setAttribute("aria-hidden", "true");
@@ -360,9 +398,26 @@ window.qdiiCompass.closeChat = closeChat;
 window.qdiiCompass.isChatOpen = () => els.panel?.getAttribute("aria-hidden") === "false";
 window.qdiiCompass.askAboutFund = (code) => {
   if (!code) return;
+  if (!window.qdiiCompass?.isLoggedIn?.()) {
+    window.qdiiCompass?.requireLogin?.();
+    return;
+  }
   const fund = window.qdiiCompass?.getFund?.(code) || { code, name: code };
+  // 从详情栏进入：每次都开新会话，不恢复历史（与直接打开 AI 投顾的路径不同）
+  sessionId = null;
+  history = [];
+  saveSessionId(null);
+  clearLocalHistory();
+  closeHistoryPanel();
   attachedFund = fund;
+  els.messages.innerHTML = "";
+  showWelcome();
+  restored = true;
   renderAttach();
+  const drawer = document.getElementById("drawer");
+  if (drawer && drawer.getAttribute("aria-hidden") === "false") {
+    drawer.classList.add("drawer--from-chat");
+  }
   openChat({ keepDrawer: true });
   setTimeout(() => els.input.focus(), 80);
 };
@@ -620,14 +675,20 @@ function renderTurn(turn) {
   }
 }
 
-function showWelcome() {
-  const items = pickRandomSuggestions(6);
+async function showWelcome() {
+  const tpl = await loadSuggestionTemplates();
+  const items = attachedFund
+    ? fundSuggestions(attachedFund, tpl)
+    : pickRandomSuggestions(tpl.genericGroups, 6);
   const chips = items
     .map((q) => `<button class="chat-suggestion" type="button" data-question="${escapeHtml(q)}">${escapeHtml(q)}</button>`)
     .join("");
+  const intro = attachedFund
+    ? `你好，我是 QDII 基金 AI 投顾。下面是关于「${escapeHtml(attachedFund.name || attachedFund.code)}」的常见问题，也可以在底部直接提问：`
+    : "你好，我是 QDII 基金 AI 投顾。可以从下面选个问题开始，或在底部输入框自由提问：";
   appendMessage(
     "system",
-    `<p>你好，我是 QDII 基金 AI 投顾。可以从下面选个问题开始，或在底部输入框自由提问：</p>
+    `<p>${intro}</p>
      <div class="chat-suggestions">${chips}</div>`,
     "chat-welcome"
   );
@@ -772,8 +833,8 @@ function resetSession() {
   clearLocalHistory();
   closeHistoryPanel();
   els.messages.innerHTML = "";
-  showWelcome();
   clearAttach();
+  showWelcome();
   window.qdiiCompass?.closeDrawer?.();
 }
 
@@ -783,6 +844,7 @@ function autosizeTextarea() {
 }
 
 if (els.panel) {
+  loadSuggestionTemplates();
   els.openBtn?.addEventListener("click", openChat);
   els.closeBtn?.addEventListener("click", closeChat);
   els.panel.addEventListener("click", (e) => e.stopPropagation());
