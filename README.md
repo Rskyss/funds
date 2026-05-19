@@ -1,26 +1,29 @@
 # QDII 基金罗盘
 
-**当前版本：1.2.0** · [更新记录](CHANGELOG.md)
+**当前版本：1.3.0** · [更新记录](CHANGELOG.md)
 
-本地运行的 QDII 基金查询、筛选、对比与 AI 问答 Web 应用。前端为原生浏览器 JavaScript，后端为 Node.js HTTP 服务；数据持久化在 Supabase Postgres，基金数据主要来自东方财富 / 天天基金公开页面，AI 能力通过阿里云百炼 DashScope（OpenAI 兼容接口）调用。
+本地运行的 QDII 基金查询、筛选、对比与 AI 问答 Web 应用。前端为 **Vite + React**（源码在 `frontend/`），后端为 Node.js HTTP 服务；数据持久化在 Supabase Postgres，基金数据主要来自东方财富 / 天天基金公开页面，AI 能力通过阿里云百炼 DashScope（OpenAI 兼容接口）调用。
 
 > 本工具仅用于基金信息整理和辅助筛选，不构成投资建议。基金数据、持仓和申购状态可能有延迟，请以基金公司公告和销售平台为准。
 
 ## 功能
 
 - QDII 基金列表、收益、评分、费率、限购状态展示
-- 基金详情、净值历史、F10 投资目标 / 范围 / 业绩基准缓存
-- 收藏、自选与登录态管理
+- 基金详情、净值历史、持仓、费率、同类对比与 AI 点评
+- 收藏、自选与登录态管理（邀请码注册）
 - AI 基金短点评批量生成
 - 聊天式 Agent：筛选、比较、概念解释、事件问答、持仓关键词检索
-- 同基金不同份额提示（如人民币、美元现汇、C 类等）
+
+v1.3 相对 v1.2 尚未迁移的能力见 [CHANGELOG.md · 已知限制](CHANGELOG.md#130---2026-05-19)。
 
 ## 项目结构
 
 ```text
 server.mjs          # HTTP 服务与 API 路由
 lib/                # Supabase、鉴权、抓取、AI、向量、Agent 逻辑
-public/             # 静态前端（HTML / CSS / JS）
+frontend/           # React 源码（Vite 入口）
+public/             # 构建产物（npm run build 生成，npm start 对外服务）
+public_legacy/      # v1.2 原生 JS 前端归档（回滚参考）
 scripts/            # 数据回填、刷新、向量、AI 点评等脚本
 rules/              # Agent 策略与提示词卡片
 docs/               # 架构与规划文档
@@ -38,6 +41,7 @@ outputs/            # 生成的报告（Git 忽略）
 ```bash
 npm install
 cp .env.example .env
+npm run build
 ```
 
 在 `.env` 中填入自己的配置（变量名勿改）：
@@ -62,37 +66,50 @@ DASHSCOPE_THINKING_BUDGET=1200
 
 ## 本地开发
 
+**日常验收（推荐）**
+
 ```bash
+npm run build
 npm start
 ```
 
-浏览器访问：
+浏览器访问 `http://localhost:5173`。
 
-```text
-http://localhost:5173
+**前端热更新开发**
+
+```bash
+npm run dev
 ```
 
-无打包、无构建步骤。改前端后刷新浏览器即可；改 `.env` 后需重启 `npm start`。
+同时启动后端（默认 `8787`）与 Vite（`5173`），`/api` 由 Vite 代理。若本机有系统 HTTP 代理导致 dev 页面空白，请改用上面的 `build + start`。
+
+改 `.env` 后需重启服务；改 `frontend/` 后需重新 `npm run build`（或使用 `npm run dev`）。
 
 ## 常用命令
 
 ```bash
-npm run data:refresh      # 定时刷新基金数据
-npm run data:f10          # 回填 F10 基金详情
-npm run data:metrics      # 回填风险收益指标
-npm run data:holdings     # 回填持仓
-npm run data:managers     # 回填基金经理
-npm run data:fees         # 回填费率与申购状态
-npm run data:embed        # 生成文档向量
-npm run ai:generate       # 批量生成 AI 基金短点评
-npm run agent:test        # 运行 Agent 脚本用例
+npm run build           # 构建前端到 public/
+npm run dev             # Vite 开发模式（双进程）
+npm run preview         # 构建后启动服务
+
+npm run data:refresh    # 定时刷新基金数据
+npm run data:spark      # 回填列表迷你净值曲线（spark_json）
+npm run data:f10        # 回填 F10 基金详情
+npm run data:metrics    # 回填风险收益指标
+npm run data:holdings   # 回填持仓
+npm run data:managers   # 回填基金经理
+npm run data:fees       # 回填费率与申购状态
+npm run data:embed      # 生成文档向量
+npm run ai:generate     # 批量生成 AI 基金短点评
+npm run agent:test      # 运行 Agent 脚本用例
+npm run invite:gen      # 生成邀请码
 ```
 
 AI 点评小批量示例：
 
 ```bash
-npm run ai:generate -- --limit 10   # 仅前 10 只
-npm run ai:generate -- --force        # 覆盖已有缓存
+npm run ai:generate -- --limit 10
+npm run ai:generate -- --force
 ```
 
 ## 数据说明
@@ -100,6 +117,7 @@ npm run ai:generate -- --force        # 覆盖已有缓存
 - 基金列表与收益数据来自东方财富基金排行页
 - F10 详情来自天天基金页面
 - 持仓为定期披露数据，相对实际持仓有滞后
+- 列表迷你曲线存于 `funds.spark_json`，由净值历史降采样生成
 - 数据库字段为 `snake_case`，JavaScript 为 `camelCase`，映射在 `lib/store.mjs`
 
 ## 安全提示

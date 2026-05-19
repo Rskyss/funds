@@ -32,6 +32,7 @@ import {
   getNavHistory,
   updateFundMetric,
   backfillMaxDrawdownForCodes,
+  backfillSparkForCodes,
   getFavorites,
   addFavorite,
   removeFavorite,
@@ -54,7 +55,7 @@ import { synthesize, synthesizeStream, pickCards } from "./lib/agent/synth.mjs";
 import { loadSession, saveSession, appendTurn, updateLast, randomUUID } from "./lib/agent/session.mjs";
 import { logChatTurn, rateLimit } from "./lib/agent/metrics.mjs";
 import { suggestionTemplates } from "./lib/agent/rules.mjs";
-import { formatDataUpdateDisplay } from "./lib/dataSchedule.mjs";
+import { formatDataUpdateDisplay, scheduledUpdateBefore } from "./lib/dataSchedule.mjs";
 
 const PORT = Number(process.env.PORT || 5173);
 const ROOT = process.cwd();
@@ -209,6 +210,24 @@ async function refreshFunds() {
     console.warn(`最大回撤计算跳过：${err.message}`);
   }
 
+  const sparkStart = Date.now();
+  console.log(`根据净值历史生成列表精简曲线 ${codes.length} 只...`);
+  try {
+    const sparkMap = await backfillSparkForCodes(codes, {
+      concurrency: 12,
+      onProgress: (done, total) => {
+        if (done === total || done % 100 === 0) {
+          console.log(`  曲线进度 ${done}/${total}`);
+        }
+      },
+    });
+    let sFilled = 0;
+    sparkMap.forEach((v) => { if (v) sFilled++; });
+    console.log(`列表曲线生成完成：${sFilled} 只有值，用时 ${((Date.now() - sparkStart) / 1000).toFixed(1)}s`);
+  } catch (err) {
+    console.warn(`列表曲线生成跳过：${err.message}`);
+  }
+
   return snapshot;
 }
 
@@ -222,18 +241,37 @@ async function attachAiSummaries(funds) {
   });
 }
 
+/** 列表快照，供详情页同类对比复用，避免每次打开抽屉都查全表 */
+let fundsListSnapshot = null;
+
+function rememberFundsSnapshot(funds) {
+  if (Array.isArray(funds) && funds.length) {
+    fundsListSnapshot = funds;
+  }
+}
+
+async function getFundsSnapshot() {
+  if (fundsListSnapshot?.length) return fundsListSnapshot;
+  const funds = await getAllFunds();
+  if (funds.length) applyPercentileScores(funds);
+  rememberFundsSnapshot(funds);
+  return funds;
+}
+
 async function loadOrRefresh(refresh) {
   if (refresh) {
     const snapshot = await refreshFunds();
-    const funds = await attachAiSummaries(snapshot.funds);
+    const withAi = await attachAiSummaries(snapshot.funds);
+    rememberFundsSnapshot(withAi);
     const lastUpdated = await getLastUpdatedAt();
     const { fetchedAt, fetchedAtText } = formatDataUpdateDisplay(lastUpdated);
-    return { ...snapshot, funds, fetchedAt, fetchedAtText };
+    return { ...snapshot, funds: withAi, fetchedAt, fetchedAtText };
   }
   const funds = await getAllFunds();
   if (funds.length) {
     applyPercentileScores(funds);
     const [withAi, lastUpdated] = await Promise.all([attachAiSummaries(funds), getLastUpdatedAt()]);
+    rememberFundsSnapshot(withAi);
     const { fetchedAt, fetchedAtText } = formatDataUpdateDisplay(lastUpdated);
     return {
       fetchedAt,
@@ -243,10 +281,11 @@ async function loadOrRefresh(refresh) {
     };
   }
   const snapshot = await refreshFunds();
-  const refreshedFunds = await attachAiSummaries(snapshot.funds);
+  const withAi = await attachAiSummaries(snapshot.funds);
+  rememberFundsSnapshot(withAi);
   const lastUpdated = await getLastUpdatedAt();
   const { fetchedAt, fetchedAtText } = formatDataUpdateDisplay(lastUpdated);
-  return { ...snapshot, funds: refreshedFunds, fetchedAt, fetchedAtText };
+  return { ...snapshot, funds: withAi, fetchedAt, fetchedAtText };
 }
 
 async function loadFundDetailWithHistory(code, allFundsCache) {
@@ -254,7 +293,7 @@ async function loadFundDetailWithHistory(code, allFundsCache) {
     getFundDetail(code),
     getNavHistory(code),
     getAiSummary(code),
-    allFundsCache ? Promise.resolve(allFundsCache) : getAllFunds(),
+    allFundsCache?.length ? Promise.resolve(allFundsCache) : getFundsSnapshot(),
   ]);
 
   let detail = detailRow
@@ -303,18 +342,16 @@ async function loadFundDetailWithHistory(code, allFundsCache) {
       : { holdings: [], reportDate: null };
     assetAllocation = Array.isArray(detailRow.asset_allocation_json) ? detailRow.asset_allocation_json : [];
   } else {
-    try {
-      const [fetched, fetchedAlloc] = await Promise.all([
-        fetchFundHoldings(code),
-        fetchAssetAllocation(code).catch(() => []),
-      ]);
-      holdingsResult = fetched;
-      assetAllocation = fetchedAlloc || [];
-      saveFundHoldingsCache(code, holdingsResult, assetAllocation).catch(() => {});
-    } catch {
-      holdingsResult = { holdings: [], reportDate: null };
-      assetAllocation = [];
-    }
+    holdingsResult = { holdings: [], reportDate: null };
+    assetAllocation = [];
+    Promise.all([
+      fetchFundHoldings(code),
+      fetchAssetAllocation(code).catch(() => []),
+    ])
+      .then(([fetched, fetchedAlloc]) => {
+        saveFundHoldingsCache(code, fetched, fetchedAlloc || []).catch(() => {});
+      })
+      .catch(() => {});
   }
 
   let managers = [];
@@ -339,15 +376,14 @@ async function loadFundDetailWithHistory(code, allFundsCache) {
     ? detailRow.operating_fees_json
     : null;
   if (!detailRow?.fees_fetched_at || !operatingFees?.management) {
-    try {
-      const fees = await fetchFundFees(code);
-      buyFees = fees.buyFees?.length ? fees.buyFees : buyFees;
-      redeemFees = fees.redeemFees?.length ? fees.redeemFees : redeemFees;
-      operatingFees = fees.operatingFees || operatingFees;
-      saveFundFees(code, buyFees, redeemFees, operatingFees).catch(() => {});
-    } catch {
-      // 保持空数组
-    }
+    fetchFundFees(code)
+      .then((fees) => {
+        const nextBuy = fees.buyFees?.length ? fees.buyFees : buyFees;
+        const nextRedeem = fees.redeemFees?.length ? fees.redeemFees : redeemFees;
+        const nextOp = fees.operatingFees || operatingFees;
+        saveFundFees(code, nextBuy, nextRedeem, nextOp).catch(() => {});
+      })
+      .catch(() => {});
   }
 
   return {
@@ -382,7 +418,15 @@ async function serveStatic(req, res) {
   try {
     const ext = path.extname(filePath);
     const body = await readFile(filePath);
-    res.writeHead(200, { "content-type": mimeTypes[ext] || "application/octet-stream" });
+    // 带内容哈希的构建产物可永久缓存；HTML 入口必须每次校验，否则刷新拿不到新代码
+    const isHashedAsset = safePath.startsWith("/assets/");
+    const cacheControl = isHashedAsset
+      ? "public, max-age=31536000, immutable"
+      : "no-cache";
+    res.writeHead(200, {
+      "content-type": mimeTypes[ext] || "application/octet-stream",
+      "cache-control": cacheControl,
+    });
     res.end(body);
   } catch {
     res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
@@ -421,7 +465,7 @@ const server = createServer(async (req, res) => {
 
     const detailMatch = url.pathname.match(/^\/api\/fund\/(\d{6})$/);
     if (detailMatch && req.method === "GET") {
-      const detail = await loadFundDetailWithHistory(detailMatch[1]);
+      const detail = await loadFundDetailWithHistory(detailMatch[1], fundsListSnapshot);
       json(res, 200, detail);
       return;
     }
@@ -843,4 +887,32 @@ const server = createServer(async (req, res) => {
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`QDII Fund Compass running at http://localhost:${PORT}`);
+  // 启动后自检：数据若早于"最近一个定时更新时刻"，后台补刷一次（不阻塞服务启动）
+  catchUpRefreshOnBoot();
 });
+
+let bootRefreshing = false;
+async function catchUpRefreshOnBoot() {
+  if (bootRefreshing) return;
+  bootRefreshing = true;
+  try {
+    const lastUpdated = await getLastUpdatedAt();
+    const expectedSlot = scheduledUpdateBefore(new Date().toISOString());
+    const stale = !lastUpdated || (expectedSlot && new Date(lastUpdated).getTime() < expectedSlot.getTime());
+    if (!stale) {
+      console.log("[启动自检] 数据已是最新，无需补刷");
+      return;
+    }
+    console.log("[启动自检] 数据已过期，开始后台补刷…");
+    const snapshot = await refreshFunds();
+    const withAi = await attachAiSummaries(snapshot.funds);
+    rememberFundsSnapshot(withAi);
+    const fresh = await getLastUpdatedAt();
+    const { fetchedAtText } = formatDataUpdateDisplay(fresh);
+    console.log(`[启动自检] 补刷完成 ✓ 展示更新时间 ${fetchedAtText}，共 ${snapshot.total} 只`);
+  } catch (err) {
+    console.error("[启动自检] 补刷失败（不影响服务运行）：", err?.message || err);
+  } finally {
+    bootRefreshing = false;
+  }
+}

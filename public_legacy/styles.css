@@ -1,21 +1,60 @@
 :root {
-  --bg: #f8fafc;
+  /* ===== 新设计系统 token（采自 fund/ 原型 compass.css）===== */
+  --bg-deep: #eceff7;
+  --surface-soft: #f9fafd;
+  --surface-tint: #f2f5fc;
+  --border: #e5e8f0;
+  --border-strong: #d4dae6;
+  --border-soft: #eef0f6;
+  --hairline: rgba(11, 23, 51, 0.08);
+
+  --ink-2: #1c2845;
+  --ink-3: #3a4665;
+  --muted-2: #9aa3b5;
+
+  --accent: #1e40ff;
+  --accent-hover: #1731d6;
+  --accent-soft: #eef1ff;
+  --accent-edge: #c9d3ff;
+  --accent-glow: rgba(30, 64, 255, 0.18);
+
+  --up: #e0341f;
+  --up-soft: #fdecea;
+  --down: #0a8f5c;
+  --down-soft: #e5f5ee;
+  --amber-soft: #fcefd9;
+
+  --shadow-s: 0 1px 0 rgba(11, 23, 51, 0.04), 0 1px 2px rgba(11, 23, 51, 0.04);
+  --shadow-m: 0 1px 0 rgba(11, 23, 51, 0.04), 0 6px 18px -10px rgba(11, 23, 51, 0.18);
+  --shadow-l: 0 8px 28px -14px rgba(30, 64, 255, 0.22), 0 18px 40px -22px rgba(11, 23, 51, 0.22);
+
+  --radius-xs: 6px;
+  --radius-pill: 999px;
+
+  --font-sans: "Inter", "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --easing: cubic-bezier(0.22, 1, 0.36, 1);
+  --easing-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* ===== 兼容旧变量名：值已重映射到新配色，结构无需改动 ===== */
+  --bg: #f4f6fb;
   --surface: #ffffff;
-  --surface-2: #f1f5f9;
-  --text: #334155;
-  --muted: #64748b;
-  --line: #e2e8f0;
-  --blue: #2563eb;
-  --blue-hover: #1d4ed8;
-  --green: #059669;
-  --red: #e11d48;
-  --amber: #d97706;
-  --ink: #0f172a;
-  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-  --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05);
-  --shadow-md: 0 10px 15px -3px rgb(0 0 0 / 0.05), 0 4px 6px -4px rgb(0 0 0 / 0.05);
-  --shadow-lg: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
-  --radius: 16px;
+  --surface-2: var(--surface-tint);
+  --text: var(--ink-2);
+  --muted: #6b7689;
+  --line: var(--border);
+  --blue: var(--accent);
+  --blue-hover: var(--accent-hover);
+  --green: var(--down);
+  --red: var(--up);
+  --amber: #b5640d;
+  --ink: #0b1733;
+  --shadow-sm: var(--shadow-s);
+  --shadow: var(--shadow-m);
+  --shadow-md: var(--shadow-m);
+  --shadow-lg: var(--shadow-l);
+  --radius: 14px;
   --radius-sm: 10px;
 }
 
@@ -27,9 +66,11 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "cv11", "ss01", "tnum";
   line-height: 1.5;
 }
 
@@ -903,7 +944,7 @@ select:focus {
 
 .holding-code {
   color: var(--muted);
-  font-family: ui-monospace, "Menlo", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
 }
 
@@ -2375,7 +2416,7 @@ td.num {
 .chat-card__head span {
   font-size: 12px;
   color: var(--muted);
-  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-family: var(--font-mono);
 }
 
 .chat-card__chips {
