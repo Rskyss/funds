@@ -4,24 +4,27 @@
 
 本地运行的 QDII 基金查询、筛选、对比与 AI 问答 Web 应用。前端为 **Vite + React**（源码在 `frontend/`），后端为 Node.js HTTP 服务；数据持久化在 Supabase Postgres，基金数据主要来自东方财富 / 天天基金公开页面，AI 能力通过阿里云百炼 DashScope（OpenAI 兼容接口）调用。
 
+**线上实例**：https://funds.aisoup.ai
+
 > 本工具仅用于基金信息整理和辅助筛选，不构成投资建议。基金数据、持仓和申购状态可能有延迟，请以基金公司公告和销售平台为准。
 
 ## 功能
 
 - QDII 基金列表、收益、评分、费率、限购状态展示；列表迷你净值曲线、板块风向筛选、只看自选、排序升/降
 - 基金详情、净值历史、持仓、费率、同类对比；列表一句话 AI 点评 + 详情抽屉长点评（250–350 字）
-- 收藏、自选与登录态管理（邀请码注册）
+- 收藏、自选与登录态管理（邀请码注册；登录走服务端 `/api/auth/signin`，错误提示中文化）
 - AI 基金短点评 / 详情长点评批量生成（`npm run ai:generate`、`npm run ai:detail`）
 - 聊天式 Agent：筛选、比较、概念解释、事件问答、持仓关键词检索；开场 **2 条 🔥 热议 + 4 条固定推荐**；流式思考过程可折叠查看
 - 管理后台 `/admin`：用户、邀请码、对话记录（需配置 `ADMIN_PASSWORD`）
 
-尚未迁移的能力见 [CHANGELOG.md · 已知限制](CHANGELOG.md#140---2026-05-20)。
+尚未迁移的能力见 [CHANGELOG.md · 已知限制](CHANGELOG.md#150---2026-05-20)。
 
 ## 项目结构
 
 ```text
 server.mjs          # HTTP 服务与 API 路由
 lib/                # Supabase、鉴权、抓取、AI、向量、Agent 逻辑
+lib/authSignIn.mjs  # 服务端邮箱密码登录（publishable key）
 frontend/           # React 源码（Vite 入口）
 public/             # 构建产物（npm run build 生成，npm start 对外服务）
 public_legacy/      # v1.2 原生 JS 前端归档（回滚参考）
@@ -63,7 +66,7 @@ DASHSCOPE_THINKING_BUDGET=1200
 ADMIN_PASSWORD=          # 管理后台 /admin，留空则后台不可用
 ```
 
-更多可选项见 `.env.example`（如 Agent 轮次、Tavily 搜索、数据更新时间等）。首次部署 v1.4 还需在 Supabase 执行 `docs/ai-热议推荐/migration.sql`，并为 `fund_ai_summary` 增加详情点评字段（见 [CHANGELOG.md](CHANGELOG.md#140---2026-05-20)）。
+更多可选项见 `.env.example`（如 Agent 轮次、Tavily 搜索、数据更新时间等）。全新 Supabase 环境还需执行 `docs/ai-热议推荐/migration.sql`，并为 `fund_ai_summary` 增加详情点评字段（见 [CHANGELOG · v1.4](CHANGELOG.md#140---2026-05-20)）。**v1.5 无新增表结构。**
 
 请勿将 `.env` 提交到 Git；真实密钥只放在本地 `.env` 中。
 
@@ -107,6 +110,7 @@ npm run ai:generate     # 批量生成 AI 基金短点评（列表卡片）
 npm run ai:detail       # 批量生成 AI 详情长点评（抽屉）
 npm run agent:test      # 运行 Agent 脚本用例
 npm run invite:gen      # 生成邀请码
+npm run auth:reset-password  # 管理员重置用户密码（需 SUPABASE_SECRET_KEY）
 ```
 
 AI 点评小批量示例：
@@ -116,6 +120,22 @@ npm run ai:generate -- --limit 10
 npm run ai:generate -- --force
 npm run ai:detail -- --limit 10
 ```
+
+密码重置示例：
+
+```bash
+npm run auth:reset-password -- user@example.com 新密码至少6位
+```
+
+## 生产部署（简要）
+
+```bash
+npm run build
+# 同步代码与 public/ 到服务器，配置 .env 后：
+PORT=3002 npm start   # 或使用 PM2：pm2 start npm --name funds -- start
+```
+
+Nginx 将站点根目录指向 `public/`，`/api` 与页面请求反代到 Node 进程（默认监听 `127.0.0.1:PORT`）。静态 `.js`/`.css` 需能从 `public/assets/` 正确加载。
 
 ## 数据说明
 
