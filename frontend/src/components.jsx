@@ -1,13 +1,25 @@
 /* QDII Compass — UI components */
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import {
-  genSpark,
-  KPIS,
   QUICK_CHIPS,
-  TAPE,
 } from "./data.js";
 import { getToken, getSession } from "./auth.js";
 import { readDetailCache, writeDetailCache } from "./detailCache.js";
+
+// 清洗 AI 卡片点评：去掉模型可能带出来的「(42字)」字数标注与整句外包的引号
+function cleanAiSummary(s) {
+  if (!s) return s;
+  let t = String(s).trim();
+  t = t.replace(/[（(]\s*\d+\s*字\s*[)）]\s*$/g, "").trim();
+  const head = /^[“”‘’「『"']+/;
+  const tail = /[“”‘’」』"']+$/;
+  for (let i = 0; i < 3; i++) {
+    const before = t;
+    t = t.replace(head, "").replace(tail, "").trim();
+    if (t === before) break;
+  }
+  return t;
+}
 
 // ============== Number count-up ==============
 function CountUp({ value, duration = 1100, decimals = 0, prefix = "", suffix = "" }) {
@@ -91,28 +103,6 @@ function Sparkline({
   );
 }
 
-// ============== Tape ticker (top bar) ==============
-function MarketTape({ items }) {
-  return (
-    <div className="market-tape">
-      {items.map((it) => {
-        const up = it.pct >= 0;
-        const spark = genSpark(it.seed, it.drift, 0.014, 30);
-        return (
-          <div className="tape-item" key={it.name}>
-            <span className="tape-item__name">{it.name}</span>
-            <span className="tape-item__val">{it.val}</span>
-            <Sparkline data={spark} width={56} height={16} thickness={1.4} fill={false} animate={false} />
-            <span className={`tape-item__delta ${up ? "up" : "down"}`}>
-              {up ? "+" : ""}{it.pct.toFixed(2)}%
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 // ============== Top bar ==============
 function TopBar({ onOpenChat, session, onLogin, onLogout }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -135,16 +125,7 @@ function TopBar({ onOpenChat, session, onLogin, onLogout }) {
           </div>
         </div>
 
-        <nav className="topbar__nav">
-          <button className="is-active">市场总览</button>
-          <button>基金列表</button>
-          <button>我的自选</button>
-          <button>研究观点</button>
-        </nav>
-
-        <MarketTape items={TAPE} />
-
-        <div className="topbar__actions">
+<div className="topbar__actions">
           <button className="icon-btn" title="通知">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10 21a2 2 0 0 0 4 0"/></svg>
           </button>
@@ -180,60 +161,57 @@ function TopBar({ onOpenChat, session, onLogin, onLogout }) {
 }
 
 // ============== Hero / KPI ==============
-function Hero({ kpis = KPIS, total, updatedText }) {
+function Hero({ boards = [], selected, onSelect, total, updatedText }) {
   return (
     <section className="hero">
       <div className="hero__grid"/>
 
-      <div className="hero__head">
-        <div>
-          <span className="hero__eyebrow">QDII MARKET COMPASS · 海外配置罗盘</span>
-          <h1>看清海外基金 · 把每个决策落到数据上</h1>
-          <p className="hero__sub">汇总 {total || "全市场"} 只跨境 QDII 基金的实时净值、回撤、夏普与持仓变化，配合 AI 投顾给出可解释的研究依据。</p>
-        </div>
+      <div className="hero__meta-row">
+        <span className="hero__eyebrow">QDII MARKET COMPASS · 海外配置罗盘</span>
         <div className="hero__time">
-          数据更新 <strong>{updatedText || "—"}</strong> · 行情延迟 ≤ 15 分钟
+          数据更新 <strong>{updatedText || "—"}</strong>
         </div>
       </div>
 
-      <div className="kpi-grid">
-        {kpis.map((k, i) => (
-          <KpiCell key={k.id} kpi={k} delay={i * 0.12}/>
-        ))}
+      <div className="hero__layout">
+        <div className="hero__content">
+          <h1>看清海外基金<br/>把每个决策落到数据上</h1>
+          <p className="hero__sub">汇总 {total || "全市场"} 只跨境 QDII 基金的实时净值、回撤、夏普与持仓变化，配合 AI 投顾给出可解释的研究依据。</p>
+        </div>
+
+        <div className="hero__data">
+          <div className="boards-head">
+            <span className="boards-head__title">今日 QDII 板块风向 <span className="boards-head__sub">今日平均涨跌</span></span>
+          </div>
+          <div className="boards">
+            {boards.map((b) => {
+              const up = b.avg1d >= 0;
+              const active = selected === b.theme;
+              return (
+                <button
+                  key={b.theme}
+                  className={`board ${active ? "is-active" : ""}`}
+                  onClick={() => onSelect(b.theme)}
+                >
+                  <div className="board__name">
+                    {b.theme}
+                    <span className="board__count">{b.count} 只</span>
+                  </div>
+                  <div className={`board__chg ${up ? "up" : "down"}`}>
+                    {up ? "+" : ""}{b.avg1d.toFixed(2)}%
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </section>
   );
 }
 
-function KpiCell({ kpi, delay }) {
-  const spark = useMemo(() => genSpark(kpi.sparkSeed, kpi.drift, kpi.vol, 40), [kpi]);
-  const decimals = kpi.value % 1 !== 0 ? 1 : 0;
-  return (
-    <div className="kpi">
-      <div className="kpi__label">
-        {kpi.label}
-        <span className="tag">{kpi.tag}</span>
-      </div>
-      <div className="kpi__value">
-        <strong>
-          <CountUp value={kpi.value} decimals={decimals} duration={1300}/>
-        </strong>
-        <span className="unit">{kpi.unit}</span>
-      </div>
-      <div className="kpi__foot">
-        <span className={`kpi__delta ${kpi.deltaKind}`}>{kpi.delta}</span>
-        <div className="kpi__spark">
-          <Sparkline data={spark} width={110} height={28} fill thickness={1.5}
-            stroke={kpi.deltaKind === "up" ? "var(--up)" : kpi.deltaKind === "down" ? "var(--down)" : "var(--accent)"}/>
-        </div>
-      </div>
-      <div className="kpi__bar" style={{ animationDelay: `${delay}s` }}/>
-    </div>
-  );
-}
-
 // ============== Toolbar / filters ==============
-function Toolbar({ q, setQ, sort, setSort }) {
+function Toolbar({ q, setQ }) {
   return (
     <div className="toolbar">
       <label className="search-box">
@@ -246,23 +224,41 @@ function Toolbar({ q, setQ, sort, setSort }) {
         />
         <kbd>⌘ K</kbd>
       </label>
+    </div>
+  );
+}
 
-      <div className="select-box">
-        <span className="label">区域</span>
-        <span>全部</span>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6"/></svg>
-      </div>
-      <div className="select-box">
-        <span className="label">主题</span>
-        <span>全部</span>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6"/></svg>
-      </div>
-      <div className="select-box">
-        <span className="label">排序</span>
-        <span>{sort === "return1y" ? "近1年收益" : sort === "sharpe" ? "夏普比率" : sort === "rating" ? "晨星评级" : "规模"}</span>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6"/></svg>
-      </div>
+const SORT_OPTIONS = [
+  { value: "return1y", label: "近1年收益" },
+  { value: "sharpe", label: "夏普比率" },
+  { value: "rating", label: "晨星评级" },
+  { value: "aum", label: "基金规模" },
+];
 
+function ListControls({ sort, sortDir, onSortChange }) {
+  return (
+    <div className="list-controls" role="group" aria-label="列表操作">
+      <span className="list-controls__prefix">排序</span>
+      {SORT_OPTIONS.map((o) => {
+        const isActive = sort === o.value;
+        return (
+          <button
+            key={o.value}
+            type="button"
+            className={`list-controls__btn ${isActive ? "is-active" : ""}`}
+            onClick={() => {
+              if (isActive) {
+                onSortChange(o.value, sortDir === "desc" ? "asc" : "desc");
+              } else {
+                onSortChange(o.value, "desc");
+              }
+            }}
+          >
+            {o.label}
+            {isActive && <span className="sort-dir">{sortDir === "asc" ? "↑" : "↓"}</span>}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -270,7 +266,7 @@ function Toolbar({ q, setQ, sort, setSort }) {
 function QuickChips({ active, setActive }) {
   return (
     <div className="chips-row">
-      <span className="chips-row__label">HOT FILTERS</span>
+      <span className="chips-row__label">热门筛选</span>
       {QUICK_CHIPS.map((c) => (
         <button
           key={c.id}
@@ -302,7 +298,7 @@ function FundCardSkeleton() {
 }
 
 // ============== Fund Card (lightweight v2) ==============
-const FundCard = React.memo(function FundCard({ fund, idx, isFav, onFav, onOpen }) {
+const FundCard = React.memo(function FundCard({ fund, idx, isFav, onFav, onOpen, isOpen }) {
   const trend = fund.return1y >= 0 ? "up" : "down";
 
   const riskClass = fund.risk === "高" ? "tag--risk-high" : "tag--risk-mid";
@@ -317,7 +313,7 @@ const FundCard = React.memo(function FundCard({ fund, idx, isFav, onFav, onOpen 
 
   return (
     <article
-      className={`fcard ${isNew ? "fcard--new" : ""}`}
+      className={`fcard ${isNew ? "fcard--new" : ""} ${isOpen ? "fcard--active" : ""}`}
       style={{ animationDelay: `${Math.min(idx, 11) * 0.04}s` }}
       onClick={() => onOpen && onOpen(fund)}
     >
@@ -384,9 +380,13 @@ const FundCard = React.memo(function FundCard({ fund, idx, isFav, onFav, onOpen 
           : <strong className="none">—</strong>}</span>
       </div>
 
-      <p className="fcard__ai">
-        {fund.aiSummary ? fund.aiSummary : "AI 点评生成中…"}
-      </p>
+      <div className="fcard__quote">
+        <span className="fcard__quote-mark fcard__quote-mark--open" aria-hidden="true">"</span>
+        <p className="fcard__quote-text">
+          {fund.aiSummary ? cleanAiSummary(fund.aiSummary) : "AI 点评生成中…"}
+        </p>
+        <span className="fcard__quote-mark fcard__quote-mark--close" aria-hidden="true">"</span>
+      </div>
 
     </article>
   );
@@ -434,6 +434,7 @@ function adaptDetail(api, fund) {
       redeemFees: (api.redeemFees || []).map((r) => ({ period: r.period, rate: r.rate })),
     },
     aiSummary: api.aiSummary || "暂无 AI 点评。",
+    aiDetail: api.aiDetail || null,
     peer: {
       themeSamples: peer.themeCount ?? 0,
       themeRank1y: peer.themeRank1y ?? 0,
@@ -512,6 +513,7 @@ function buildPreviewDetail(fund) {
       redeemFees: [],
     },
     aiSummary: "正在加载 AI 点评…",
+    aiDetail: null,
     peer: { themeSamples: 0, themeRank1y: 0, regionRankScore: 0, benchmark: "—" },
     suitability: [],
     riskNotes: [],
@@ -600,6 +602,7 @@ function FundDrawer({ fund, onClose, isFav, onFav, chatOpen, onOpenFund, onOpenC
   const [dRefreshing, setDRefreshing] = useState(false);
   const [dError, setDError] = useState(null);
   const [mgrId, setMgrId] = useState(null);
+  const [aiExpanded, setAiExpanded] = useState(false);
 
   const requestClose = useCallback(() => {
     if (!renderFund) return;
@@ -651,6 +654,7 @@ function FundDrawer({ fund, onClose, isFav, onFav, chatOpen, onOpenFund, onOpenC
     let alive = true;
     setDError(null);
     setFeeTab("buy");
+    setAiExpanded(false);
     const cached = readDetailCache(renderFund.code);
     setDetail(cached ? adaptDetail(cached, renderFund) : buildPreviewDetail(renderFund));
     setDRefreshing(!cached);
@@ -800,16 +804,35 @@ function FundDrawer({ fund, onClose, isFav, onFav, chatOpen, onOpenFund, onOpenC
 
 
           {/* AI 点评 */}
-          <section className="dsection">
-            <div className="ai-summary">
-              <div className="ai-summary__head">
-                <span className="ai-summary__tag">AI 点评</span>
-              </div>
-              <div className="ai-summary__body">
-                <p>{d.aiSummary}</p>
-              </div>
-            </div>
-          </section>
+          {(() => {
+            const aiText = d.aiDetail || d.aiSummary || "";
+            const isLong = !!d.aiDetail && aiText.length > 80;
+            const bodyCls =
+              "ai-summary__body" +
+              (isLong ? " ai-summary__body--long" : "") +
+              (isLong && !aiExpanded ? " ai-summary__body--collapsed" : "");
+            return (
+              <section className="dsection">
+                <div className="ai-summary">
+                  <div className="ai-summary__head">
+                    <span className="ai-summary__tag">AI 点评</span>
+                    {isLong && (
+                      <button
+                        type="button"
+                        className="ai-summary__toggle"
+                        onClick={() => setAiExpanded((v) => !v)}
+                      >
+                        {aiExpanded ? "收起" : "展开全文"}
+                      </button>
+                    )}
+                  </div>
+                  <div className={bodyCls}>
+                    <p>{cleanAiSummary(aiText)}</p>
+                  </div>
+                </div>
+              </section>
+            );
+          })()}
 
           {/* 交易规则 + 费率 */}
           <section className="dsection">
@@ -1351,18 +1374,51 @@ function normalizeCard(c) {
   };
 }
 
-// 行内富文本：**加粗**、・/- 列表、按 6 位代码就近插卡（与旧版 renderReplyWithCards 同口径）
-function RichReply({ text, cards, onOpenFund }) {
+// 行内富文本：**加粗**、・/- 列表、按 6 位代码就近插卡（强提示），
+// 同时把正文里所有 6 位代码渲染成蓝色加粗的弱链接（点击打开二级抽屉）。
+function RichReply({ text, cards, onOpenFund, openFundCode }) {
   const cardByCode = new Map();
   for (const c of cards || []) if (c?.code) cardByCode.set(c.code, c);
   const shown = new Set();
 
+  // 把一段不含加粗的纯文本，按 6 位代码切分，代码部分渲染成可点击的弱链接 button
+  function renderTextWithCodes(s, keyBase) {
+    // 清理 markdown 反引号包裹的代码：`123456` → 123456
+    const cleaned = s.replace(/`(\d{6})`/g, "$1");
+    const out = [];
+    const re = /(\d{6})/g;
+    let lastIdx = 0;
+    let m;
+    let i = 0;
+    while ((m = re.exec(cleaned))) {
+      if (m.index > lastIdx) out.push(
+        <React.Fragment key={`${keyBase}-t${i++}`}>{cleaned.slice(lastIdx, m.index)}</React.Fragment>
+      );
+      const code = m[1];
+      out.push(
+        <button
+          key={`${keyBase}-c${i++}`}
+          type="button"
+          className={`ai-inline-code${openFundCode === code ? " is-active" : ""}`}
+          onClick={() => onOpenFund && onOpenFund({ code })}
+        >
+          {code}
+        </button>
+      );
+      lastIdx = m.index + code.length;
+    }
+    if (lastIdx < cleaned.length) out.push(
+      <React.Fragment key={`${keyBase}-t${i++}`}>{cleaned.slice(lastIdx)}</React.Fragment>
+    );
+    return out;
+  }
+
   function renderInline(s, keyBase) {
     const parts = s.split(/(\*\*[^*\n]+\*\*)/g);
-    return parts.map((p, i) =>
+    return parts.flatMap((p, i) =>
       /^\*\*[^*\n]+\*\*$/.test(p)
-        ? <strong key={`${keyBase}-b${i}`}>{p.slice(2, -2)}</strong>
-        : <React.Fragment key={`${keyBase}-t${i}`}>{p}</React.Fragment>
+        ? [<strong key={`${keyBase}-b${i}`}>{p.slice(2, -2)}</strong>]
+        : renderTextWithCodes(p, `${keyBase}-s${i}`)
     );
   }
 
@@ -1394,7 +1450,7 @@ function RichReply({ text, cards, onOpenFund }) {
         if (shown.has(code)) return;
         shown.add(code);
         nodes.push(
-          <EmbedFundCard key={`ic-${code}`} f={normalizeCard(cardByCode.get(code))} onOpen={() => onOpenFund && onOpenFund({ code })}/>
+          <EmbedFundCard key={`ic-${code}`} f={normalizeCard(cardByCode.get(code))} onOpen={() => onOpenFund && onOpenFund({ code })} isOpen={openFundCode === code}/>
         );
       });
     }
@@ -1408,7 +1464,7 @@ function RichReply({ text, cards, onOpenFund }) {
       {rest.length > 0 && (
         <div className="ai-cards">
           {rest.map((c) => (
-            <EmbedFundCard key={`rc-${c.code}`} f={normalizeCard(c)} onOpen={() => onOpenFund && onOpenFund({ code: c.code })}/>
+            <EmbedFundCard key={`rc-${c.code}`} f={normalizeCard(c)} onOpen={() => onOpenFund && onOpenFund({ code: c.code })} isOpen={openFundCode === c.code}/>
           ))}
         </div>
       )}
@@ -1432,7 +1488,7 @@ function fundSuggestions(fund) {
     `现在适合买入 ${n} 吗？需要注意什么风险？`,
     `${n} 受美元兑人民币汇率影响大吗？`,
     `${n} 限购吗？申购赎回到账要多久？`,
-  ];
+  ].map((text) => ({ text, hot: false }));
 }
 
 function rotate(pool, page, n = 6) {
@@ -1456,7 +1512,18 @@ function pickSuggestions(groups, n = 6) {
   return out.slice(0, n);
 }
 
-function AIDrawer({ open, onClose, onOpenFund, fundDrawerOpen, loggedIn, onRequireLogin, contextFund, onClearContext, onNewSession }) {
+// 合并 AI 热议（最多 2 条，带 hot 标记）+ 固定库（按主题随机抽，补满到 6 条）
+function buildSuggestions(data, n = 6) {
+  const hotRaw = Array.isArray(data?.hot) ? data.hot.filter((s) => typeof s === "string" && s.trim()) : [];
+  const hot = hotRaw.slice(0, 2).map((text) => ({ text, hot: true }));
+  const fillerCount = Math.max(0, n - hot.length);
+  const filler = pickSuggestions(data?.genericGroups || [], fillerCount)
+    .filter((text) => !hot.some((h) => h.text === text))
+    .map((text) => ({ text, hot: false }));
+  return [...hot, ...filler].slice(0, n);
+}
+
+function AIDrawer({ open, onClose, onOpenFund, openFundCode, fundDrawerOpen, loggedIn, onRequireLogin, contextFund, onClearContext, onNewSession }) {
   const [view, setView] = useState("empty"); // "empty" | "chat" | "history"
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState([]);
@@ -1474,10 +1541,19 @@ function AIDrawer({ open, onClose, onOpenFund, fundDrawerOpen, loggedIn, onRequi
   }, [open, onClose]);
 
   useEffect(() => {
+    if (open) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => { document.body.style.overflow = ""; };
+  }, [open]);
+
+  useEffect(() => {
     if (!open || suggestions.length) return;
     fetch("/api/chat/suggestions")
       .then((r) => r.json())
-      .then((d) => setSuggestions(pickSuggestions(d.genericGroups || [], 6)))
+      .then((d) => setSuggestions(buildSuggestions(d, 18)))
       .catch(() => {});
   }, [open]);
 
@@ -1536,7 +1612,7 @@ function AIDrawer({ open, onClose, onOpenFund, fundDrawerOpen, loggedIn, onRequi
     setMessages((m) => [
       ...m,
       { role: "user", content: txt },
-      { role: "assistant", content: "", cards: [], sources: [], streaming: true },
+      { role: "assistant", content: "", thinking: "", cards: [], sources: [], streaming: true },
     ]);
 
     const patchLast = (patch) =>
@@ -1577,6 +1653,8 @@ function AIDrawer({ open, onClose, onOpenFund, fundDrawerOpen, loggedIn, onRequi
             cards = Array.isArray(data) ? data : [];
           } else if (event === "sources") {
             sources = Array.isArray(data) ? data : [];
+          } else if (event === "thinking") {
+            patchLast((prev) => ({ thinking: (prev.thinking || "") + (data?.text || "") }));
           } else if (event === "delta") {
             acc += data?.text || "";
             patchLast({ content: acc });
@@ -1603,7 +1681,19 @@ function AIDrawer({ open, onClose, onOpenFund, fundDrawerOpen, loggedIn, onRequi
   const hasMsgs = messages.length > 0;
 
   return (
-    <aside className={`aidrawer ${open ? "is-open" : ""} ${fundDrawerOpen ? "aidrawer--shifted" : ""}`} role="dialog" aria-modal="false" aria-hidden={!open}>
+    <>
+      <div
+        className={`drawer-backdrop ${open ? "is-visible" : ""}`}
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      <aside
+        className={`aidrawer ${open ? "is-open" : ""} ${fundDrawerOpen ? "aidrawer--shifted" : ""}`}
+        role="dialog"
+        aria-modal="false"
+        aria-hidden={!open}
+        onClick={(e) => e.stopPropagation()}
+      >
       <header className="aidrawer__head">
         <div>
           <p className="aidrawer__eyebrow">AI 投顾</p>
@@ -1649,7 +1739,7 @@ function AIDrawer({ open, onClose, onOpenFund, fundDrawerOpen, loggedIn, onRequi
             {messages.map((m, i) => (
               m.role === "user"
                 ? <UserBubble key={i} text={m.content}/>
-                : <AIBubble key={i} msg={m} onOpenFund={onOpenFund}/>
+                : <AIBubble key={i} msg={m} onOpenFund={onOpenFund} openFundCode={openFundCode}/>
             ))}
           </div>
         )}
@@ -1682,7 +1772,8 @@ function AIDrawer({ open, onClose, onOpenFund, fundDrawerOpen, loggedIn, onRequi
         </form>
         <p className="aidrawer__disclaimer">本工具非投资建议，数据可能有延迟，决策请以基金公告为准。</p>
       </footer>
-    </aside>
+      </aside>
+    </>
   );
 }
 
@@ -1702,11 +1793,21 @@ function EmptyView({ pool, contextFund, onPick }) {
         </p>
       </div>
       <div className="ai-empty__suggests">
-        {(shown.length ? shown : ["加载推荐问题中…"]).map((s, i) => (
-          <button key={`${page}-${i}`} className="ai-suggest" onClick={() => onPick(s)} disabled={!shown.length}>
-            {s}
-          </button>
-        ))}
+        {(shown.length ? shown : [{ text: "加载推荐问题中…", hot: false }]).map((s, i) => {
+          const text = typeof s === "string" ? s : s.text;
+          const isHot = typeof s === "object" && s.hot;
+          return (
+            <button
+              key={`${page}-${i}`}
+              className={`ai-suggest${isHot ? " ai-suggest--hot" : ""}`}
+              onClick={() => onPick(text)}
+              disabled={!shown.length}
+            >
+              {isHot && <span className="ai-suggest__hot" aria-label="热议">🔥</span>}
+              {text}
+            </button>
+          );
+        })}
       </div>
       {canShuffle && (
         <button className="ai-empty__shuffle" onClick={() => setPage((p) => p + 1)}>
@@ -1751,12 +1852,28 @@ function UserBubble({ text }) {
   );
 }
 
-function AIBubble({ msg, onOpenFund }) {
+function AIBubble({ msg, onOpenFund, openFundCode }) {
+  const hasThinking = !!msg.thinking;
+  // 思考中（还没出回答）默认展开；回答开始后默认折叠
+  const thinkingOpen = hasThinking && !msg.content;
   return (
     <div className="ai-msg ai-msg--ai">
       <div className="ai-msg__inner">
-        {msg.streaming && !msg.content && <p className="ai-msg__text ai-typing">正在思考…</p>}
-        {msg.content && <RichReply text={msg.content} cards={msg.cards} onOpenFund={onOpenFund}/>}
+        {hasThinking && (
+          <details className="ai-thinking" open={thinkingOpen}>
+            <summary className="ai-thinking__head">
+              <span className="ai-thinking__icon">💭</span>
+              <span className="ai-thinking__label">
+                {msg.content ? "已思考" : "思考中"}
+                <span className="ai-thinking__count">· {msg.thinking.length} 字</span>
+              </span>
+              <span className="ai-thinking__chevron" aria-hidden="true">▾</span>
+            </summary>
+            <div className="ai-thinking__body">{msg.thinking}</div>
+          </details>
+        )}
+        {msg.streaming && !msg.content && !hasThinking && <p className="ai-msg__text ai-typing">正在思考…</p>}
+        {msg.content && <RichReply text={msg.content} cards={msg.cards} onOpenFund={onOpenFund} openFundCode={openFundCode}/>}
         {msg.sources && msg.sources.length > 0 && (
           <details className="ai-sources">
             <summary>引用 {msg.sources.length} 条来源</summary>
@@ -1772,10 +1889,10 @@ function AIBubble({ msg, onOpenFund }) {
   );
 }
 
-function EmbedFundCard({ f, onOpen }) {
+function EmbedFundCard({ f, onOpen, isOpen }) {
   const statusCls = f.status === "open" ? "tag--status-open" : f.status === "limit" ? "tag--status-limit" : "tag--status-stop";
   return (
-    <div className="ai-fcard" onClick={onOpen}>
+    <div className={`ai-fcard${isOpen ? " ai-fcard--active" : ""}`} onClick={onOpen}>
       <div className="ai-fcard__head">
         <span className={`tag ${statusCls}`}>{f.status === "open" ? "可申购" : f.limitText || "暂停"}</span>
         <span className="ai-fcard__code mono">{f.code}</span>
@@ -1808,4 +1925,4 @@ function EmbedFundCard({ f, onOpen }) {
   );
 }
 
-export { TopBar, Hero, Toolbar, QuickChips, FundCard, FundCardSkeleton, FundDrawer, AIDrawer };
+export { TopBar, Hero, Toolbar, ListControls, QuickChips, FundCard, FundCardSkeleton, FundDrawer, AIDrawer };

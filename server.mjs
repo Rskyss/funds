@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
 import path from "node:path";
 
 import {
@@ -45,6 +46,7 @@ import {
   claimInviteCode,
   releaseInviteCode,
   attachInviteCodeUser,
+  createInviteCodes,
 } from "./lib/store.mjs";
 import { generateWithRetry } from "./lib/ai.mjs";
 import { publicConfig, supabaseAdmin } from "./lib/supabase.mjs";
@@ -55,6 +57,7 @@ import { synthesize, synthesizeStream, pickCards } from "./lib/agent/synth.mjs";
 import { loadSession, saveSession, appendTurn, updateLast, randomUUID } from "./lib/agent/session.mjs";
 import { logChatTurn, rateLimit } from "./lib/agent/metrics.mjs";
 import { suggestionTemplates } from "./lib/agent/rules.mjs";
+import { getActiveHotSuggestions, maybeRefreshHotSuggestions } from "./lib/agent/hotTopics.mjs";
 import { formatDataUpdateDisplay, scheduledUpdateBefore } from "./lib/dataSchedule.mjs";
 
 const PORT = Number(process.env.PORT || 5173);
@@ -68,6 +71,17 @@ const mimeTypes = {
   ".json": "application/json; charset=utf-8",
   ".svg": "image/svg+xml",
 };
+
+// ----- Admin auth -----
+const adminTokens = new Map(); // token -> expiry ms
+function checkAdminToken(req) {
+  const t = (req.headers["authorization"] || "").replace(/^Bearer\s+/i, "").trim();
+  if (!t) return false;
+  const exp = adminTokens.get(t);
+  if (!exp) return false;
+  if (Date.now() > exp) { adminTokens.delete(t); return false; }
+  return true;
+}
 
 function json(res, statusCode, payload) {
   res.writeHead(statusCode, {
@@ -403,6 +417,9 @@ async function loadFundDetailWithHistory(code, allFundsCache) {
     aiSummary: aiRow?.summary || null,
     aiSummaryModel: aiRow?.model || null,
     aiSummaryAt: aiRow?.generated_at || null,
+    aiDetail: aiRow?.detail_summary || null,
+    aiDetailModel: aiRow?.detail_model || null,
+    aiDetailAt: aiRow?.detail_generated_at || null,
   };
 }
 
@@ -429,8 +446,15 @@ async function serveStatic(req, res) {
     });
     res.end(body);
   } catch {
-    res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
-    res.end("Not found");
+    // SPA fallback：对于不存在的路径（如 /admin）统一返回 index.html
+    try {
+      const body = await readFile(path.join(PUBLIC_DIR, "index.html"));
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache" });
+      res.end(body);
+    } catch {
+      res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+      res.end("Not found");
+    }
   }
 }
 
@@ -452,7 +476,13 @@ const server = createServer(async (req, res) => {
     }
 
     if (url.pathname === "/api/chat/suggestions" && req.method === "GET") {
-      json(res, 200, suggestionTemplates());
+      const base = suggestionTemplates();
+      const hot = await getActiveHotSuggestions().catch(() => null);
+      json(res, 200, {
+        ...base,
+        hot: hot?.questions || [],
+        hotMeta: hot ? { reason: hot.triggerReason, createdAt: hot.createdAt } : null,
+      });
       return;
     }
 
@@ -667,6 +697,7 @@ const server = createServer(async (req, res) => {
             state,
             profile: userProfile,
             onDelta: (delta) => send("delta", { text: delta }),
+            onReasoningDelta: (delta) => send("thinking", { text: delta }),
           });
           if (!synth.ok) {
             const fallback = synth.error?.includes("AllocationQuota.FreeTierOnly")
@@ -878,6 +909,113 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    // ===== Admin API =====
+    if (url.pathname === "/api/admin/login" && req.method === "POST") {
+      const body = await readBody(req);
+      const pw = process.env.ADMIN_PASSWORD;
+      if (!pw) { json(res, 503, { error: "ADMIN_PASSWORD 未配置" }); return; }
+      if (!body.password || body.password !== pw) { json(res, 401, { error: "密码错误" }); return; }
+      const token = randomBytes(32).toString("hex");
+      adminTokens.set(token, Date.now() + 24 * 60 * 60 * 1000);
+      json(res, 200, { token });
+      return;
+    }
+
+    if (url.pathname === "/api/admin/verify" && req.method === "GET") {
+      if (!checkAdminToken(req)) { json(res, 401, { error: "未授权" }); return; }
+      json(res, 200, { ok: true });
+      return;
+    }
+
+    if (url.pathname === "/api/admin/stats" && req.method === "GET") {
+      if (!checkAdminToken(req)) { json(res, 401, { error: "未授权" }); return; }
+      const [usersRes, invitesRes, chatsRes] = await Promise.all([
+        supabaseAdmin.auth.admin.listUsers({ perPage: 1000 }),
+        supabaseAdmin.from("invite_codes").select("status"),
+        supabaseAdmin.from("chat_logs").select("id", { count: "exact", head: true }),
+      ]);
+      const invites = invitesRes.data || [];
+      json(res, 200, {
+        totalUsers: usersRes.data?.users?.length || 0,
+        unusedInvites: invites.filter(i => i.status === "unused").length,
+        usedInvites: invites.filter(i => i.status === "used").length,
+        totalChats: chatsRes.count || 0,
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/admin/users" && req.method === "GET") {
+      if (!checkAdminToken(req)) { json(res, 401, { error: "未授权" }); return; }
+      const { data: authData } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
+      const users = authData?.users || [];
+      const { data: chatRows } = await supabaseAdmin.from("chat_logs").select("user_id").not("user_id", "is", null);
+      const chatMap = {};
+      for (const c of chatRows || []) chatMap[c.user_id] = (chatMap[c.user_id] || 0) + 1;
+      const { data: invCodes } = await supabaseAdmin.from("invite_codes").select("code, used_by").eq("status", "used");
+      const invMap = {};
+      for (const ic of invCodes || []) if (ic.used_by) invMap[ic.used_by] = ic.code;
+      const result = users
+        .map(u => ({ id: u.id, email: u.email, createdAt: u.created_at, lastSignIn: u.last_sign_in_at, chatCount: chatMap[u.id] || 0, inviteCode: invMap[u.id] || null }))
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      json(res, 200, { users: result });
+      return;
+    }
+
+    if (url.pathname === "/api/admin/invites" && req.method === "GET") {
+      if (!checkAdminToken(req)) { json(res, 401, { error: "未授权" }); return; }
+      const { data, error } = await supabaseAdmin.from("invite_codes").select("*").order("created_at", { ascending: false });
+      if (error) { json(res, 500, { error: error.message }); return; }
+      json(res, 200, { invites: data || [] });
+      return;
+    }
+
+    if (url.pathname === "/api/admin/invites" && req.method === "POST") {
+      if (!checkAdminToken(req)) { json(res, 401, { error: "未授权" }); return; }
+      const body = await readBody(req);
+      const count = Math.max(1, Math.min(50, parseInt(body.count, 10) || 1));
+      const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+      const rows = Array.from({ length: count }, () => {
+        let s = ""; for (let i = 0; i < 8; i++) s += chars[Math.floor(Math.random() * chars.length)];
+        return { code: s, note: body.note || null };
+      });
+      const created = await createInviteCodes(rows);
+      json(res, 200, { codes: created.map(r => r.code) });
+      return;
+    }
+
+    if (url.pathname === "/api/admin/chats" && req.method === "GET") {
+      if (!checkAdminToken(req)) { json(res, 401, { error: "未授权" }); return; }
+      const page = Math.max(0, parseInt(url.searchParams.get("page") || "0", 10));
+      const userId = url.searchParams.get("userId") || null;
+      const limit = 30;
+      let query = supabaseAdmin
+        .from("chat_logs")
+        .select("id, session_id, user_id, intent, user_message, reply_preview, ok, degraded, error, latency_ms, created_at")
+        .order("created_at", { ascending: false })
+        .range(page * limit, page * limit + limit - 1);
+      if (userId) query = query.eq("user_id", userId);
+      const { data, error } = await query;
+      if (error) { json(res, 500, { error: error.message }); return; }
+      // 批量取用户邮箱
+      const uids = [...new Set((data || []).map(r => r.user_id).filter(Boolean))];
+      const emailMap = {};
+      if (uids.length) {
+        const { data: authData } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
+        for (const u of authData?.users || []) emailMap[u.id] = u.email;
+      }
+      const rows = (data || []).map(r => ({ ...r, userEmail: emailMap[r.user_id] || null }));
+      json(res, 200, { chats: rows, page, hasMore: (data || []).length === limit });
+      return;
+    }
+
+    const invDelMatch = url.pathname.match(/^\/api\/admin\/invites\/([A-Z0-9]{6,12})$/);
+    if (invDelMatch && req.method === "DELETE") {
+      if (!checkAdminToken(req)) { json(res, 401, { error: "未授权" }); return; }
+      await supabaseAdmin.from("invite_codes").delete().eq("code", invDelMatch[1]).eq("status", "unused");
+      json(res, 200, { ok: true });
+      return;
+    }
+
     await serveStatic(req, res);
   } catch (error) {
     console.error(error);
@@ -895,18 +1033,21 @@ let bootRefreshing = false;
 async function catchUpRefreshOnBoot() {
   if (bootRefreshing) return;
   bootRefreshing = true;
+  let fundsForHot = null;
   try {
     const lastUpdated = await getLastUpdatedAt();
     const expectedSlot = scheduledUpdateBefore(new Date().toISOString());
     const stale = !lastUpdated || (expectedSlot && new Date(lastUpdated).getTime() < expectedSlot.getTime());
     if (!stale) {
       console.log("[启动自检] 数据已是最新，无需补刷");
+      try { fundsForHot = await getFundsSnapshot(); } catch {}
       return;
     }
     console.log("[启动自检] 数据已过期，开始后台补刷…");
     const snapshot = await refreshFunds();
     const withAi = await attachAiSummaries(snapshot.funds);
     rememberFundsSnapshot(withAi);
+    fundsForHot = withAi;
     const fresh = await getLastUpdatedAt();
     const { fetchedAtText } = formatDataUpdateDisplay(fresh);
     console.log(`[启动自检] 补刷完成 ✓ 展示更新时间 ${fetchedAtText}，共 ${snapshot.total} 只`);
@@ -914,5 +1055,9 @@ async function catchUpRefreshOnBoot() {
     console.error("[启动自检] 补刷失败（不影响服务运行）：", err?.message || err);
   } finally {
     bootRefreshing = false;
+    // 后台异步跑热议事件检测，不影响主流程；失败由模块内部静默
+    if (fundsForHot?.length) {
+      setTimeout(() => { maybeRefreshHotSuggestions(fundsForHot); }, 1500);
+    }
   }
 }

@@ -4,6 +4,7 @@ import {
   TopBar,
   Hero,
   Toolbar,
+  ListControls,
   QuickChips,
   FundCard,
   FundCardSkeleton,
@@ -15,7 +16,7 @@ import AuthModal from "./AuthModal.jsx";
 import { init as initAuth, onAuthChange, signOut, getSession, authedFetch } from "./auth.js";
 import { readFundsCache, writeFundsCache } from "./fundsCache.js";
 
-const ACCENT = "#1E40FF";
+const ACCENT = "#3480F4";
 
 // 真实接口字段 → 原型组件期望字段（旧业务口径：purchaseStatus = 开放/限购/暂停/null）
 function normalizeFund(f) {
@@ -50,17 +51,23 @@ function normalizeFund(f) {
   };
 }
 
-function computeKpis(funds, total) {
-  const n = funds.length;
-  const rated4 = funds.filter((f) => f.ratingMorningstar && f.ratingMorningstar >= 4).length;
-  const techPct = n ? Math.round((funds.filter((f) => f.theme === "科技成长").length / n) * 100) : 0;
-  const avg1y = n ? +(funds.reduce((s, f) => s + (f.return1y || 0), 0) / n).toFixed(1) : 0;
-  return [
-    { id: "total", label: "QDII 全市场基金", tag: "ALL", value: total || n, unit: "只", delta: "实时收录", deltaKind: "neutral", sparkSeed: 7, drift: 0.05, vol: 0.012 },
-    { id: "stars", label: "晨星 4+ 星", tag: "★", value: rated4, unit: "只", delta: "评级 ≥ 4 星", deltaKind: "up", sparkSeed: 17, drift: 0.08, vol: 0.014 },
-    { id: "tech", label: "科技成长占比", tag: "%", value: techPct, unit: "%", delta: "主题分布", deltaKind: "up", sparkSeed: 27, drift: 0.07, vol: 0.010 },
-    { id: "avg1y", label: "QDII 平均 1Y 回报", tag: "1Y", value: avg1y, unit: "%", delta: "近 1 年均值", deltaKind: avg1y >= 0 ? "up" : "down", sparkSeed: 37, drift: 0.15, vol: 0.018 },
-  ];
+// "综合配置" 是未归类的兜底桶，不算一个有意义的板块，不展示
+const BOARD_EXCLUDE = new Set(["综合配置"]);
+
+function computeBoards(funds) {
+  const g = new Map();
+  for (const f of funds) {
+    const theme = f.theme;
+    if (!theme || BOARD_EXCLUDE.has(theme)) continue;
+    let e = g.get(theme);
+    if (!e) { e = { theme, count: 0, sum: 0, valued: 0 }; g.set(theme, e); }
+    e.count += 1;
+    if (typeof f.return1d === "number") { e.sum += f.return1d; e.valued += 1; }
+  }
+  return [...g.values()]
+    .map((e) => ({ theme: e.theme, count: e.count, avg1d: e.valued ? +(e.sum / e.valued).toFixed(2) : 0 }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 6);
 }
 
 function App() {
@@ -68,8 +75,11 @@ function App() {
 
   const [q, setQ] = useState("");
   const [sort, setSort] = useState("return1y");
+  const [sortDir, setSortDir] = useState("desc");
   const [activeChip, setActiveChip] = useState(null);
+  const [themeSel, setThemeSel] = useState(null);
   const [favs, setFavs] = useState(new Set());
+  const [favOnly, setFavOnly] = useState(false);
   const [session, setSession] = useState(null);
   const [authModal, setAuthModal] = useState(null); // null | "login" | "register"
 
@@ -80,7 +90,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!session) { setFavs(new Set()); return; }
+    if (!session) { setFavs(new Set()); setFavOnly(false); return; }
     let alive = true;
     authedFetch("/api/favorites")
       .then((r) => (r.ok ? r.json() : { favorites: [] }))
@@ -95,7 +105,6 @@ function App() {
   const [allFunds, setAllFunds] = useState([]);
   const [meta, setMeta] = useState({ total: 0, fetchedAtText: "" });
   const [loading, setLoading] = useState(() => !readFundsCache());
-  const [syncing, setSyncing] = useState(false);
   const [loadError, setLoadError] = useState(null);
 
   useEffect(() => {
@@ -110,10 +119,7 @@ function App() {
     };
 
     const cached = readFundsCache();
-    if (cached) {
-      applyPayload(cached);
-      setSyncing(true);
-    }
+    if (cached) applyPayload(cached);
 
     fetch("/api/funds")
       .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
@@ -121,11 +127,9 @@ function App() {
         if (!alive) return;
         writeFundsCache(data);
         applyPayload(data);
-        setSyncing(false);
       })
       .catch((e) => {
         if (!alive) return;
-        setSyncing(false);
         if (!cached) {
           setLoadError(e.message);
           setLoading(false);
@@ -170,21 +174,31 @@ function App() {
     }
   }, [favs]);
 
+  const handleOpenFund = useCallback((fund) => {
+    setOpenFund((cur) => (cur?.code === fund?.code ? null : fund));
+  }, []);
+
   const openFundByCode = useCallback((f) => {
     const code = typeof f === "string" ? f : f?.code;
     if (!code) return;
     const fromList = allFunds.find((x) => x.code === code);
-    if (fromList) { setOpenFund(fromList); return; }
-    setOpenFund({
-      code, name: f?.name || code,
-      region: "", theme: "", role: "", risk: "",
-      manager: "—", rating: 0, sharpe: 0, aum: 0, drawdown: 0,
-      return3m: 0, return1y: 0, returnYtd: 0,
-      status: "open", limitYuan: null, sparkSeed: parseInt(code, 10) || 1,
+    setOpenFund((cur) => {
+      if (cur?.code === code) return null;
+      if (fromList) return fromList;
+      return {
+        code, name: f?.name || code,
+        region: "", theme: "", role: "", risk: "",
+        manager: "—", rating: 0, sharpe: 0, aum: 0, drawdown: 0,
+        return3m: 0, return1y: 0, returnYtd: 0,
+        status: "open", limitYuan: null, sparkSeed: parseInt(code, 10) || 1,
+      };
     });
   }, [allFunds]);
 
-  const kpis = useMemo(() => computeKpis(allFunds, meta.total), [allFunds, meta.total]);
+  const boards = useMemo(() => computeBoards(allFunds), [allFunds]);
+  const toggleTheme = useCallback((th) => {
+    setThemeSel((s) => (s === th ? null : th));
+  }, []);
 
   // filter funds
   let funds = allFunds;
@@ -205,12 +219,15 @@ function App() {
       if (chip.keyword) funds = funds.filter((f) => f.name.includes(chip.keyword));
     }
   }
+  if (themeSel) funds = funds.filter((f) => f.theme === themeSel);
+  if (favOnly) funds = funds.filter((f) => favs.has(f.code));
   funds = [...funds].sort((a, b) => {
-    if (sort === "return1y") return b.return1y - a.return1y;
-    if (sort === "sharpe")   return b.sharpe - a.sharpe;
-    if (sort === "rating")   return b.rating - a.rating;
-    if (sort === "aum")      return b.aum - a.aum;
-    return 0;
+    let diff = 0;
+    if (sort === "return1y") diff = a.return1y - b.return1y;
+    else if (sort === "sharpe") diff = a.sharpe - b.sharpe;
+    else if (sort === "rating") diff = a.rating - b.rating;
+    else if (sort === "aum") diff = a.aum - b.aum;
+    return sortDir === "asc" ? diff : -diff;
   });
 
   return (
@@ -222,28 +239,38 @@ function App() {
         onLogout={signOut}
       />
       <main className="shell">
-        <Hero kpis={kpis} total={meta.total} updatedText={meta.fetchedAtText}/>
+        <Hero boards={boards} selected={themeSel} onSelect={toggleTheme} total={meta.total} updatedText={meta.fetchedAtText}/>
 
-        <Toolbar
-          q={q} setQ={setQ}
-          sort={sort} setSort={setSort}
-        />
-
-        <QuickChips active={activeChip} setActive={setActiveChip}/>
+        <div className="filter-row">
+          <Toolbar q={q} setQ={setQ} />
+          <QuickChips active={activeChip} setActive={setActiveChip}/>
+        </div>
 
         <div className="results-head">
           <h2>
             QDII 基金列表
-            <span className="count">{funds.length}</span>
-            <span className="total"> / {allFunds.length}</span>
+            <span className="count-wrap">
+              <span className="count">{funds.length}</span>
+              <span className="total"> / {allFunds.length}</span>
+            </span>
+            <span className="list-controls" style={{ marginLeft: "10px" }}>
+              <button
+                className={`list-controls__btn ${favOnly ? "is-active" : ""}`}
+                onClick={() => {
+                  if (!favOnly && !session) { setAuthModal("login"); return; }
+                  setFavOnly(!favOnly);
+                }}
+              >
+                自选（{favs.size}）
+              </button>
+            </span>
           </h2>
           <div className="results-meta">
-            <span className="live-pill">
-              <span className="live-pill__dot"/>
-              LIVE · NAV
-            </span>
-            {syncing && <span className="sync-pill">同步中</span>}
-            <span>自选 <strong style={{color: "#E8A50B", fontFamily: "var(--font-mono)"}}>{favs.size}</strong></span>
+            <ListControls
+              sort={sort}
+              sortDir={sortDir}
+              onSortChange={(k, d) => { setSort(k); setSortDir(d); }}
+            />
           </div>
         </div>
 
@@ -257,7 +284,12 @@ function App() {
             数据加载失败：{loadError}
           </div>
         )}
-        {allFunds.length > 0 && (
+        {allFunds.length > 0 && funds.length === 0 && (
+          <div className="empty-hint">
+            {favOnly ? "你还没有收藏任何基金，或当前筛选下没有匹配的自选。" : "没有匹配的 QDII 基金，试试调整搜索或筛选条件。"}
+          </div>
+        )}
+        {allFunds.length > 0 && funds.length > 0 && (
         <div className="fund-grid">
           {funds.map((f, i) => (
             <FundCard
@@ -266,7 +298,8 @@ function App() {
               idx={i}
               isFav={favs.has(f.code)}
               onFav={toggleFav}
-              onOpen={setOpenFund}
+              onOpen={handleOpenFund}
+              isOpen={openFund?.code === f.code}
             />
           ))}
         </div>
@@ -274,14 +307,7 @@ function App() {
 
         <footer className="page-foot">
           <div className="page-foot__inner">
-            <div className="page-foot__brand">
-              <div className="brand__mark" aria-hidden="true"/>
-              <div>
-                <div className="brand__title">QDII 罗盘</div>
-                <div className="brand__sub">FUND COMPASS · PRO</div>
-              </div>
-            </div>
-            <p>本工具仅用于基金信息整理与分析，不构成投资建议。基金数据、持仓与申购状态可能存在延迟，最终以基金公司公告与销售平台为准。</p>
+<p>本工具仅用于基金信息整理与分析，不构成投资建议。基金数据、持仓与申购状态可能存在延迟，最终以基金公司公告与销售平台为准。</p>
             <div className="page-foot__meta">
               <span>数据源 · 东方财富 / 天天基金 / 晨星</span>
               <span>·</span>
@@ -306,6 +332,7 @@ function App() {
         open={chatOpen}
         onClose={() => setChatOpen(false)}
         fundDrawerOpen={!!openFund}
+        openFundCode={openFund?.code || null}
         onOpenFund={openFundByCode}
         loggedIn={!!session}
         onRequireLogin={() => setAuthModal("login")}

@@ -199,9 +199,7 @@ const QUICK_CHIPS = [
   { id: "nasdaq100", label: "纳指100",    keyword: "纳指" },
   { id: "hk-tech",   label: "港股科技",   region: "港股",  theme: "科技成长" },
   { id: "gold",      label: "黄金主题",   theme: "贵金属" },
-  { id: "broad",     label: "宽基指数",   theme: "宽基指数" },
-  { id: "core",      label: "底仓首选",   role: "底仓候选" },
-  { id: "attack",    label: "进攻型",     role: "进攻仓" },
+{ id: "attack",    label: "进攻型",     role: "进攻仓" },
   { id: "fivestar",  label: "晨星 5★",   rating: 5 },
   { id: "buyable",   label: "可申购",     status: "open" },
 ];
