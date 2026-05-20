@@ -8,13 +8,14 @@
 
 ## 功能
 
-- QDII 基金列表、收益、评分、费率、限购状态展示
-- 基金详情、净值历史、持仓、费率、同类对比与 AI 点评
+- QDII 基金列表、收益、评分、费率、限购状态展示；列表迷你净值曲线、板块风向筛选、只看自选、排序升/降
+- 基金详情、净值历史、持仓、费率、同类对比；列表一句话 AI 点评 + 详情抽屉长点评（250–350 字）
 - 收藏、自选与登录态管理（邀请码注册）
-- AI 基金短点评批量生成
-- 聊天式 Agent：筛选、比较、概念解释、事件问答、持仓关键词检索
+- AI 基金短点评 / 详情长点评批量生成（`npm run ai:generate`、`npm run ai:detail`）
+- 聊天式 Agent：筛选、比较、概念解释、事件问答、持仓关键词检索；开场 **2 条 🔥 热议 + 4 条固定推荐**；流式思考过程可折叠查看
+- 管理后台 `/admin`：用户、邀请码、对话记录（需配置 `ADMIN_PASSWORD`）
 
-v1.3 相对 v1.2 尚未迁移的能力见 [CHANGELOG.md · 已知限制](CHANGELOG.md#130---2026-05-19)。
+尚未迁移的能力见 [CHANGELOG.md · 已知限制](CHANGELOG.md#140---2026-05-20)。
 
 ## 项目结构
 
@@ -58,9 +59,11 @@ DASHSCOPE_MODEL_STRONG=qwen-max
 DASHSCOPE_MODEL_STRONG_FALLBACK=qwen-plus
 DASHSCOPE_ENABLE_THINKING=0
 DASHSCOPE_THINKING_BUDGET=1200
+
+ADMIN_PASSWORD=          # 管理后台 /admin，留空则后台不可用
 ```
 
-更多可选项见 `.env.example`（如 Agent 轮次、Tavily 搜索、数据更新时间等）。
+更多可选项见 `.env.example`（如 Agent 轮次、Tavily 搜索、数据更新时间等）。首次部署 v1.4 还需在 Supabase 执行 `docs/ai-热议推荐/migration.sql`，并为 `fund_ai_summary` 增加详情点评字段（见 [CHANGELOG.md](CHANGELOG.md#140---2026-05-20)）。
 
 请勿将 `.env` 提交到 Git；真实密钥只放在本地 `.env` 中。
 
@@ -100,7 +103,8 @@ npm run data:holdings   # 回填持仓
 npm run data:managers   # 回填基金经理
 npm run data:fees       # 回填费率与申购状态
 npm run data:embed      # 生成文档向量
-npm run ai:generate     # 批量生成 AI 基金短点评
+npm run ai:generate     # 批量生成 AI 基金短点评（列表卡片）
+npm run ai:detail       # 批量生成 AI 详情长点评（抽屉）
 npm run agent:test      # 运行 Agent 脚本用例
 npm run invite:gen      # 生成邀请码
 ```
@@ -110,6 +114,7 @@ AI 点评小批量示例：
 ```bash
 npm run ai:generate -- --limit 10
 npm run ai:generate -- --force
+npm run ai:detail -- --limit 10
 ```
 
 ## 数据说明
