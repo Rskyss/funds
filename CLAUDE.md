@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概览
 
-QDII 基金罗盘：本地运行的 QDII 基金查询/筛选/对比/AI 点评/聊天 Agent 的 Web 应用。当前版本 **1.4.0**：
+QDII 基金罗盘：本地运行的 QDII 基金查询/筛选/对比/AI 点评/聊天 Agent 的 Web 应用。当前版本 **1.5.0**：
 
 - 前端：Vite + React 18，源码在 `frontend/`，`npm run build` 产出到 `public/`
 - 后端：Node 原生 HTTP 服务（`server.mjs`），无框架

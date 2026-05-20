@@ -4,6 +4,48 @@
 
 ---
 
+## [1.5.0] - 2026-05-20
+
+### 新增
+
+- **服务端登录接口** `POST /api/auth/signin`：登录改走后端，统一邮箱规范化与密码首尾空白处理；错误信息中文化（`lib/authSignIn.mjs`）。
+- **运维脚本** `npm run auth:reset-password`：管理员通过 Supabase Admin 重置指定用户密码（`scripts/reset-user-password.mjs`）。
+- **前端错误边界**：根组件增加 `ErrorBoundary`，运行时异常可见报错与重试，避免整页白屏。
+
+### 修复
+
+- **申购限购展示**：东财返回「限大额」等无具体金额时，详情/列表/聊天卡片由「限购 null元/日」改为 **「大额限购」**。
+- **登录流程**：前端不再直连 Supabase `signInWithPassword`，改调 `/api/auth/signin`，与注册路径一致。
+- **注册/登录提示**：常见 Supabase 英文错误转为中文可读文案。
+
+### 改进
+
+- **顶栏品牌区**：文字品牌「QDII 罗盘 · FUND COMPASS · PRO」，可点击回首页。
+- **详情·前 10 大重仓**：过滤无效持仓行；加载中与无数据分态；商品/债基主题显示对应说明。
+- **详情·资产配置表**：增加「其他/期货等/债券等」列与堆叠条，补足 100% 构成展示。
+- **详情·费率区**：赎回费率骨架高度收紧。
+- **登录弹窗**：错误提示改用红色语义色。
+
+### 生产部署
+
+- **域名**：https://funds.aisoup.ai（Nginx 反代 → PM2 `funds`，端口 `3002`）
+- **目录**：`/www/wwwroot/funds`
+- **发版**：`npm run build` → 同步 `public/` 与后端 → `pm2 restart funds`
+
+### 依赖与上线步骤
+
+1. `npm install` → `npm run build` → 部署 `public/`、`server.mjs`、`lib/authSignIn.mjs`
+2. `.env` 仍需 `SUPABASE_*`；无新增表/字段
+3. 可选：`npm run auth:reset-password -- <邮箱> <新密码>`
+
+### 已知限制（继承 v1.4）
+
+- 多基金对比栏、偏好设置入口、完整筛选工具栏等仍未接入新 UI
+- 详情持仓/费率仍可能首次为空（异步补抓）
+- `npm run dev` 在部分代理环境下可能空白，验收建议 `build + start`
+
+---
+
 ## [1.4.0] - 2026-05-20
 
 ### 新增

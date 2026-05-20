@@ -5,6 +5,19 @@ let supabase = null;
 let session = null;
 const listeners = new Set();
 
+/** 将 Supabase 英文错误转为用户可读中文 */
+export function translateAuthError(message) {
+  const m = (message || "").trim();
+  const map = {
+    "Invalid login credentials": "邮箱或密码不正确，请检查后重试",
+    "Email not confirmed": "邮箱尚未验证，请联系管理员",
+    "User already registered": "该邮箱已注册，请直接登录",
+  };
+  if (map[m]) return map[m];
+  if (/invalid login credentials/i.test(m)) return map["Invalid login credentials"];
+  return m || "操作失败，请稍后重试";
+}
+
 function loadSession() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -56,27 +69,27 @@ export async function init() {
 }
 
 export async function signUp(email, password, inviteCode) {
+  const normalizedEmail = (email || "").trim().toLowerCase();
   const res = await fetch("/api/auth/signup", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email, password, inviteCode }),
+    body: JSON.stringify({ email: normalizedEmail, password, inviteCode }),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "注册失败");
-  return await signIn(email, password);
+  if (!res.ok) throw new Error(translateAuthError(data.error) || "注册失败");
+  return await signIn(normalizedEmail, password);
 }
 
 export async function signIn(email, password) {
-  if (!supabase) throw new Error("Supabase 未初始化");
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error) throw new Error(error.message);
+  const res = await fetch("/api/auth/signin", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(translateAuthError(data.error) || "登录失败");
   if (!data.session) throw new Error("登录失败：未返回会话");
-  session = {
-    access_token: data.session.access_token,
-    refresh_token: data.session.refresh_token,
-    expires_at: data.session.expires_at,
-    user: { id: data.user.id, email: data.user.email },
-  };
+  session = data.session;
   saveSession(session);
   emit();
   return session;

@@ -1,6 +1,6 @@
 {
   "name": "qdii-fund-compass",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -19,7 +19,8 @@
     "data:refresh": "node --env-file=.env scripts/scheduled-refresh.mjs",
     "data:embed": "node --env-file=.env scripts/embed-fund-docs.mjs",
     "agent:test": "node --env-file=.env scripts/test-agent-cases.mjs",
-    "invite:gen": "node --env-file=.env scripts/gen-invite.mjs"
+    "invite:gen": "node --env-file=.env scripts/gen-invite.mjs",
+    "auth:reset-password": "node --env-file=.env scripts/reset-user-password.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

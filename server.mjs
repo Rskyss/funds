@@ -51,6 +51,7 @@ import {
 import { generateWithRetry } from "./lib/ai.mjs";
 import { publicConfig, supabaseAdmin } from "./lib/supabase.mjs";
 import { verifyToken } from "./lib/auth.mjs";
+import { signInWithEmailPassword, translateAuthError } from "./lib/authSignIn.mjs";
 import { plan as planAgent } from "./lib/agent/planner.mjs";
 import { runPlan } from "./lib/agent/tools.mjs";
 import { synthesize, synthesizeStream, pickCards } from "./lib/agent/synth.mjs";
@@ -823,6 +824,17 @@ const server = createServer(async (req, res) => {
           eventDegraded: state.event ? !!state.event.degraded : null,
         },
       });
+      return;
+    }
+
+    if (url.pathname === "/api/auth/signin" && req.method === "POST") {
+      const body = await readBody(req);
+      try {
+        const session = await signInWithEmailPassword(body.email, body.password);
+        json(res, 200, { session });
+      } catch (err) {
+        json(res, err.code || 401, { error: err.message || translateAuthError("Invalid login credentials") });
+      }
       return;
     }
 

@@ -1,6 +1,6 @@
 # QDII 基金罗盘
 
-**当前版本：1.4.0** · [更新记录](CHANGELOG.md)
+**当前版本：1.5.0** · [更新记录](CHANGELOG.md)
 
 本地运行的 QDII 基金查询、筛选、对比与 AI 问答 Web 应用。前端为 **Vite + React**（源码在 `frontend/`），后端为 Node.js HTTP 服务；数据持久化在 Supabase Postgres，基金数据主要来自东方财富 / 天天基金公开页面，AI 能力通过阿里云百炼 DashScope（OpenAI 兼容接口）调用。
 

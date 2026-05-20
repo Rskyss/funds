@@ -5,7 +5,6 @@ import {
 } from "./data.js";
 import { getToken, getSession } from "./auth.js";
 import { readDetailCache, writeDetailCache } from "./detailCache.js";
-
 // 清洗 AI 卡片点评：去掉模型可能带出来的「(42字)」字数标注与整句外包的引号
 function cleanAiSummary(s) {
   if (!s) return s;
@@ -117,13 +116,16 @@ function TopBar({ onOpenChat, session, onLogin, onLogout }) {
   return (
     <header className="topbar">
       <div className="topbar__inner">
-        <div className="brand">
-          <div className="brand__mark" aria-hidden="true"></div>
-          <div>
-            <div className="brand__title">QDII 罗盘</div>
-            <div className="brand__sub">FUND COMPASS · PRO</div>
-          </div>
-        </div>
+        <a className="brand" href="/" aria-label="QDII 罗盘首页">
+          <span className="brand__copy">
+            <span className="brand__title">QDII 罗盘</span>
+            <span className="brand__sub">
+              <span className="brand__sub-main">FUND COMPASS</span>
+              <span className="brand__sub-sep" aria-hidden="true">·</span>
+              <span className="brand__sub-pro">PRO</span>
+            </span>
+          </span>
+        </a>
 
 <div className="topbar__actions">
           <button className="icon-btn" title="通知">
@@ -304,7 +306,7 @@ const FundCard = React.memo(function FundCard({ fund, idx, isFav, onFav, onOpen,
   const riskClass = fund.risk === "高" ? "tag--risk-high" : "tag--risk-mid";
   const statusInfo = ({
     open:  { cls: "tag--status-open",  text: "可申购" },
-    limit: { cls: "tag--status-limit", text: `限购 ${fund.limitYuan ? (fund.limitYuan >= 10000 ? `${fund.limitYuan/10000}万` : `${fund.limitYuan}元`) : ""}/日` },
+    limit: { cls: "tag--status-limit", text: formatPurchaseLimitLabel(fund.limitYuan) },
     stop:  { cls: "tag--status-stop",  text: "暂停申购" },
   })[fund.status] || { cls: "tag--status-open", text: "可申购" };
 
@@ -397,16 +399,22 @@ const FundCard = React.memo(function FundCard({ fund, idx, isFav, onFav, onOpen,
 function adaptDetail(api, fund) {
   const an = api.analysis || {};
   const navHist = (api.navHistory || []).map((p, i) => ({ i, nav: p.nav, date: p.date }));
-  const top10 = (api.holdings || []).map((h) => ({
-    rank: h.rank, code: h.stockCode, name: h.stockName, ratio: h.ratio,
-  }));
+  const top10 = (api.holdings || [])
+    .filter((h) => typeof h.ratio === "number" && h.ratio > 0)
+    .slice(0, 10)
+    .map((h) => ({
+      rank: h.rank, code: h.stockCode, name: h.stockName, ratio: h.ratio,
+    }));
   const top10Concentration = +top10.reduce((s, h) => s + (h.ratio || 0), 0).toFixed(2);
   const allocRaw = api.assetAllocation || [];
   const allocation = allocRaw.slice(0, 4).map((r, idx, arr) => {
     const prev = arr[idx + 1];
+    const stock = r.stock ?? 0;
+    const cash = r.cash ?? 0;
+    const other = Math.max(0, +(100 - stock - cash).toFixed(2));
     let trend = "→";
-    if (prev) trend = r.stock > prev.stock + 0.5 ? "加仓" : r.stock < prev.stock - 0.5 ? "减仓" : "→";
-    return { date: r.date, stock: r.stock ?? 0, cash: r.cash ?? 0, netAsset: r.netAssetBillion ?? 0, trend };
+    if (prev) trend = stock > (prev.stock ?? 0) + 0.5 ? "加仓" : stock < (prev.stock ?? 0) - 0.5 ? "减仓" : "→";
+    return { date: r.date, stock, cash, other, netAsset: r.netAssetBillion ?? 0, trend };
   });
   const peer = an.peer || {};
   const lastNav = navHist.length ? navHist[navHist.length - 1].nav : (an.realtime?.nav ?? fund.nav ?? 0);
@@ -514,7 +522,7 @@ function buildPreviewDetail(fund) {
     },
     aiSummary: "正在加载 AI 点评…",
     aiDetail: null,
-    peer: { themeSamples: 0, themeRank1y: 0, regionRankScore: 0, benchmark: "—" },
+    peer: { themeSamples: 0, themeRank1y: 0, regionRankScore: 0, benchmark: "—", themeRankNum: null, themeMedian1y: null },
     suitability: [],
     riskNotes: [],
     investGoal: "—",
@@ -842,7 +850,7 @@ function FundDrawer({ fund, onClose, isFav, onFav, chatOpen, onOpenFund, onOpenC
                 <span>申购状态</span>
                 <strong className={d.trading.purchaseStatus === "open" ? "" : d.trading.purchaseStatus === "limit" ? "warn" : "stop"}>
                   {d.trading.purchaseStatus === "open" ? "开放申购"
-                    : d.trading.purchaseStatus === "limit" ? `限购 ${d.trading.purchaseLimit >= 10000 ? `${d.trading.purchaseLimit/10000}万` : `${d.trading.purchaseLimit}元`}/日`
+                    : d.trading.purchaseStatus === "limit" ? formatPurchaseLimitLabel(d.trading.purchaseLimit)
                     : "暂停申购"}
                 </strong>
               </div>
@@ -909,37 +917,60 @@ function FundDrawer({ fund, onClose, isFav, onFav, chatOpen, onOpenFund, onOpenC
               <h3 className="dsection__h">前 10 大重仓股</h3>
               <span className="dsection__meta mono">截止 {d.holdingsDate}</span>
             </div>
-            <div className="holdings-slot">
-              <ul className="holdings-list">
-                {(d.top10.length > 0 ? d.top10 : Array.from({ length: 10 }, (_, i) => ({ skel: true, rank: i + 1 }))).map((h, i) => (
-                  h.skel ? (
+            <div className={`holdings-slot${d.top10.length === 0 && !dRefreshing ? " holdings-slot--empty" : ""}`}>
+              {d.top10.length > 0 ? (
+                <>
+                  <ul className="holdings-list">
+                    {d.top10.map((h) => (
+                      <li className="hrow" key={h.code}>
+                        <span className={`hrow__rank rank-${h.rank}`}>{h.rank}</span>
+                        <span className="hrow__code mono">{h.code}</span>
+                        <span className="hrow__name">{h.name}</span>
+                        <div className="hrow__bar"><div className="hrow__bar-fill" style={{width: `${Math.min(100, h.ratio * 10)}%`}}/></div>
+                        <span className="hrow__ratio mono">{h.ratio.toFixed(2)}%</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="dsection__note">前 10 大集中度 <strong className="mono">{d.top10Concentration.toFixed(2)}%</strong> · 单只股票波动会显著影响净值</p>
+                </>
+              ) : dRefreshing ? (
+                <ul className="holdings-list">
+                  {Array.from({ length: 10 }, (_, i) => (
                     <li className="hrow hrow--skel" key={`sk-${i}`} aria-hidden="true">
-                      <span className="hrow__rank">{h.rank}</span>
+                      <span className="hrow__rank">{i + 1}</span>
                       <span className="hrow__skel-line hrow__skel-line--sm"/>
                       <span className="hrow__skel-line hrow__skel-line--lg"/>
                       <span className="hrow__skel-bar"/>
                       <span className="hrow__skel-line hrow__skel-line--xs"/>
                     </li>
-                  ) : (
-                    <li className="hrow" key={h.code}>
-                      <span className={`hrow__rank rank-${h.rank}`}>{h.rank}</span>
-                      <span className="hrow__code mono">{h.code}</span>
-                      <span className="hrow__name">{h.name}</span>
-                      <div className="hrow__bar"><div className="hrow__bar-fill" style={{width: `${Math.min(100, h.ratio * 10)}%`}}/></div>
-                      <span className="hrow__ratio mono">{h.ratio.toFixed(2)}%</span>
-                    </li>
-                  )
-                ))}
-              </ul>
-              {d.top10.length > 0 ? (
-                <p className="dsection__note">前 10 大集中度 <strong className="mono">{d.top10Concentration.toFixed(2)}%</strong> · 单只股票波动会显著影响净值</p>
-              ) : !dRefreshing ? (
-                <p className="dsection__note dsection__note--muted">暂无持仓数据</p>
-              ) : null}
+                  ))}
+                </ul>
+              ) : (
+                <p className="dsection__note dsection__note--muted">
+                  {(() => {
+                    const theme = renderFund.theme || "";
+                    if (theme.includes("商品") || theme.includes("原油") || theme.includes("黄金")) {
+                      return "该基金以期货等商品合约为主，无前 10 大股票持仓数据";
+                    }
+                    if (theme.includes("债") || theme.includes("固收")) {
+                      return "该基金以债券为主，无前 10 大股票持仓数据";
+                    }
+                    return "暂无持仓数据";
+                  })()}
+                </p>
+              )}
             </div>
           </section>
 
           {/* 资产配置变化 */}
+          {(() => {
+            const theme = renderFund.theme || "";
+            const otherLabel = (theme.includes("商品") || theme.includes("原油") || theme.includes("黄金"))
+              ? "期货等"
+              : (theme.includes("债") || theme.includes("固收"))
+                ? "债券等"
+                : "其他";
+            return (
           <section className="dsection">
             <div className="dsection__head">
               <h3 className="dsection__h">资产配置变化</h3>
@@ -947,13 +978,15 @@ function FundDrawer({ fund, onClose, isFav, onFav, chatOpen, onOpenFund, onOpenC
             </div>
             <div className="alloc-table-slot">
             <table className="alloc-table">
-              <thead><tr><th>报告期</th><th>股票 / 现金</th><th className="num">股票</th><th className="num">现金</th><th className="num">净资产</th><th>变化</th></tr></thead>
+              <thead><tr><th>报告期</th><th>构成</th><th className="num">{otherLabel}</th><th className="num">股票</th><th className="num">现金</th><th className="num">净资产</th><th>变化</th></tr></thead>
               <tbody>
                 {allocTableRows(d.allocation)}
               </tbody>
             </table>
             </div>
           </section>
+            );
+          })()}
 
           {/* 同类对比 + 适合谁 */}
           <section className="dsection">
@@ -1072,10 +1105,12 @@ function allocTableRows(rows) {
         <td className="mono">{r.date}</td>
         <td>
           <div className="alloc-bar">
+            <div className="alloc-bar__other" style={{width: `${r.other}%`}}/>
             <div className="alloc-bar__stock" style={{width: `${r.stock}%`}}/>
             <div className="alloc-bar__cash" style={{width: `${r.cash}%`}}/>
           </div>
         </td>
+        <td className="mono num">{r.other.toFixed(2)}%</td>
         <td className="mono num">{r.stock.toFixed(2)}%</td>
         <td className="mono num">{r.cash.toFixed(2)}%</td>
         <td className="mono num">{r.netAsset.toFixed(2)} 亿</td>
@@ -1087,6 +1122,7 @@ function allocTableRows(rows) {
     <tr key={`sk-${i}`} className="alloc-row--skel" aria-hidden="true">
       <td><span className="fee-skel fee-skel--short"/></td>
       <td><span className="fee-skel fee-skel--wide"/></td>
+      <td><span className="fee-skel fee-skel--xs"/></td>
       <td><span className="fee-skel fee-skel--xs"/></td>
       <td><span className="fee-skel fee-skel--xs"/></td>
       <td><span className="fee-skel fee-skel--xs"/></td>
@@ -1356,6 +1392,12 @@ function fmtLimitYuan(yuan) {
   return yuan >= 10000 ? `${yuan / 10000}万` : `${yuan}元`;
 }
 
+/** 申购限购文案：无具体金额时显示「大额限购」（东财「限大额」等口径） */
+function formatPurchaseLimitLabel(yuan) {
+  if (yuan == null || !Number.isFinite(Number(yuan))) return "大额限购";
+  return `限购 ${fmtLimitYuan(yuan)}/日`;
+}
+
 // 真实卡片字段 → EmbedFundCard 展示字段（沿用旧版申购状态口径）
 function normalizeCard(c) {
   const status =
@@ -1365,7 +1407,7 @@ function normalizeCard(c) {
     code: c.code,
     name: c.name,
     status,
-    limitText: status === "limit" ? `限购 ${fmtLimitYuan(c.purchaseLimitYuan)}/日` : status === "stop" ? "暂停申购" : "可申购",
+    limitText: status === "limit" ? formatPurchaseLimitLabel(c.purchaseLimitYuan) : status === "stop" ? "暂停申购" : "可申购",
     tags: [c.region, c.theme, c.role].filter(Boolean),
     return3m: c.return3m ?? 0,
     return1y: c.return1y ?? 0,
