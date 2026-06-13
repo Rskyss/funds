@@ -39,6 +39,17 @@ This checkout has no Git history, so no repository-specific convention can be in
 
 Pull requests should include a summary, affected areas (`server`, `lib/store`, `public`, `scripts`), commands run, and screenshots for UI changes. Link issues or task docs when available.
 
+## 生产服务器登录
+
+线上 `funds.aisoup.ai` 部署在远程服务器，本机已配置 SSH 免密别名，直接用即可，无需密码、无需逐个尝试：
+
+- 登录：`ssh funds`
+- 服务进程：PM2 名为 `funds`（端口 `3002`，目录 `/www/wwwroot/funds`）
+- 看日志：`ssh funds "pm2 logs funds --lines 120 --nostream"`
+- 发版后重启：`ssh funds "pm2 restart funds"`
+
+别名 `funds` 定义在开发者本机的 `~/.ssh/config`（公钥免密登录）。服务器地址、账号、密码等敏感信息只保留在本地，不写入本仓库。
+
 ## Security & Configuration Tips
 
 Copy `.env.example` to `.env`. Do not commit `.env` or secrets. Required Supabase variables are `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, and `SUPABASE_PUBLISHABLE_KEY`; DashScope variables are only needed for AI summary or agent paths.

@@ -1861,6 +1861,14 @@ function EmptyView({ pool, contextFund, onPick }) {
   );
 }
 
+function fmtSessionTime(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso).slice(0, 16).replace("T", " ");
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 function HistoryView({ sessions, loggedIn, onBack, onPick }) {
   return (
     <div className="ai-history">
@@ -1877,7 +1885,7 @@ function HistoryView({ sessions, loggedIn, onBack, onPick }) {
           {sessions.map((it) => (
             <li key={it.sessionId} className="ai-history__item" onClick={() => onPick(it.sessionId)}>
               <div className="ai-history__title">{it.title || "未命名会话"}</div>
-              <div className="ai-history__meta">{(it.updatedAt || "").slice(0, 16).replace("T", " ")} · {it.count} 条</div>
+              <div className="ai-history__meta">{fmtSessionTime(it.updatedAt)} · {it.count} 条</div>
             </li>
           ))}
         </ul>

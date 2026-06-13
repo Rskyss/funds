@@ -491,6 +491,11 @@ const server = createServer(async (req, res) => {
       const refresh = url.searchParams.get("refresh") === "1";
       const snapshot = await loadOrRefresh(refresh);
       json(res, 200, snapshot);
+      // 每次"刷新数据"后（含每日 07:00 定时刷新）顺带检查一次热议是否需要更新；
+      // 后台异步、失败静默，不影响响应；模块内部有 inflight 去重与触发条件判断
+      if (refresh && snapshot?.funds?.length) {
+        setTimeout(() => { maybeRefreshHotSuggestions(snapshot.funds); }, 1500);
+      }
       return;
     }
 
