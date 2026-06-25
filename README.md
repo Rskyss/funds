@@ -6,6 +6,8 @@
 
 **线上实例**：https://funds.aisoup.ai
 
+> **Fork / 自建部署**：请先阅读 [配置说明：两套 Key 与最低要求](#配置说明两套-key-与最低要求) 与 [Fork 后首次部署](#fork-后首次部署)。基金浏览不强制平台 API Key；AI 投顾由用户自带百炼 Key（BYOK）。
+
 > 本工具仅用于基金信息整理和辅助筛选，不构成投资建议。基金数据、持仓和申购状态可能有延迟，请以基金公司公告和销售平台为准。
 
 ## 功能
@@ -38,40 +40,106 @@ outputs/            # 生成的报告（Git 忽略）
 ## 环境要求
 
 - 推荐 Node.js 20+（使用原生 `fetch` 与 `node --env-file`）
-- 已配置好表结构与 RPC 的 Supabase 项目
-- 平台侧 AI 点评、向量检索、批量生成需配置 DashScope API Key（聊天投问改由用户自带 Key）
-- 启用用户自带 Key（BYOK）需配置 `AI_KEY_SECRET`（`openssl rand -hex 32` 生成的 64 位 hex，用于加密用户 Key，上线后不可更改）
+- 已配置好表结构与 RPC 的 Supabase 项目（见下方 [Fork 后首次部署](#fork-后首次部署)）
+
+## 配置说明：两套 Key 与最低要求
+
+本项目涉及**两套互不相干的 API Key**，容易混淆，请先读这一节。
+
+### 两套 Key 各管什么
+
+| | **平台 Key**（`.env` 里的 `DASHSCOPE_API_KEY`） | **用户 Key**（登录后「模型设置」里填） |
+|---|---|---|
+| 谁配置 | 部署者 / 运营方 | 每个登录用户自己 |
+| 谁付费 | 平台 | 用户自己 |
+| 典型用途 | 批量生成短长评、向量入库、聊天时的语义检索、AI 热议 | AI 投顾对话、详情「用我的模型重新生成点评」 |
+| 不配会怎样 | 见下表「平台 Key 缺失时」 | 用户无法使用 AI 投顾；可看库里已有的共享短长评 |
+
+**普通访客**浏览基金列表、详情、收益指标：**不需要**填任何 Key。
+
+**登录用户**使用 AI 投顾：必须在「模型设置」填自己的百炼 Key + 投问模型；短长评重新生成还需填短/长评模型。服务器需配置 `AI_KEY_SECRET` 才能帮用户加密保存 Key。
+
+### 最低可运行配置（能 `npm start` 并浏览基金）
+
+```env
+# 必填 — 缺任一项服务无法启动
+SUPABASE_URL=
+SUPABASE_PUBLISHABLE_KEY=
+SUPABASE_SECRET_KEY=
+```
+
+若要做「用户自带 Key」（BYOK），还需：
+
+```env
+AI_KEY_SECRET=          # openssl rand -hex 32 生成 64 位 hex；上线后不可更改
+                        # 缺了服务能启动，但用户无法在「模型设置」里保存自己的 Key
+```
+
+以下**可不填**，服务仍能启动：
+
+```env
+DASHSCOPE_API_KEY=      # 留空：基金浏览正常；平台侧 AI 能力见下表
+TAVILY_API_KEY=         # 留空：事件类联网搜索降级
+ADMIN_PASSWORD=         # 留空：/admin 后台不可用
+```
+
+### 功能与配置依赖一览
+
+| 功能 | 需要登录 | 需要用户 Key | 需要平台 Key | 备注 |
+|------|:--------:|:------------:|:------------:|------|
+| 基金列表 / 筛选 / 排序 / 详情 | | | | 公开接口，首次访问空库会自动抓东方财富 |
+| 板块风向、收益、夏普、持仓等 | | | | |
+| 看库里已有的共享短长评 | | | | 依赖之前跑过 `npm run ai:generate` 或已有数据 |
+| 登录 / 自选收藏 | ✓ | | | 注册需邀请码（`npm run invite:gen`） |
+| AI 投顾对话 | ✓ | ✓ | | 规划与回答走用户 Key |
+| 详情「用我的模型重新生成点评」 | ✓ | ✓ | | 临时生成，不落库 |
+| 语义向量检索（聊天增强） | ✓ | ✓ | ✓ | 缺平台 Key 时静默降级，对话仍可用 |
+| 批量生成短长评 `ai:generate` | | | ✓ | 运营脚本 |
+| 向量入库 `data:embed` | | | ✓ | 运营脚本 |
+| AI 热议推荐（开场 2 条动态问题） | | | ✓ | 缺则只显示 4 条固定推荐 |
+| 事件联网搜索 | | | | 需 `TAVILY_API_KEY`（可选） |
+
+### 平台 Key 缺失时的典型部署（纯 BYOK）
+
+适合不想在服务器上放自己的百炼 Key、只让用户自带 Key 的场景：
+
+1. `.env` 保留 Supabase 三件套 + `AI_KEY_SECRET`，**可不填** `DASHSCOPE_API_KEY`
+2. 用户登录 → 「模型设置」→ 填自己的 Key 与模型 → 即可使用 AI 投顾
+3. 库里若已有历史短长评，访客和未配置用户仍可阅读共享版
+4. 向量检索、热议生成、批量点评脚本不可用或降级，不影响主流程
 
 ## 安装与配置
 
 ```bash
+git clone https://github.com/Rskyss/funds.git
+cd funds
 npm install
 cp .env.example .env
-npm run build
+# 编辑 .env，至少填入 Supabase 三件套；若开放 BYOK 再填 AI_KEY_SECRET（见上一节）
+npm run build   # 必须执行，否则 public/ 无前端产物
+npm start
 ```
 
-在 `.env` 中填入自己的配置（变量名勿改）：
+浏览器访问 `http://localhost:5173`。
 
-```env
-SUPABASE_URL=
-SUPABASE_PUBLISHABLE_KEY=
-SUPABASE_SECRET_KEY=
-DASHSCOPE_API_KEY=
+完整变量说明见 `.env.example`（模型链、Agent 轮次、Tavily、数据更新时间等）。**请勿将 `.env` 提交到 Git。**
 
-DASHSCOPE_MODEL=qwen-plus
-DASHSCOPE_MODEL_FAST=qwen-turbo
-DASHSCOPE_MODEL_STRONG=qwen-max
-DASHSCOPE_MODEL_STRONG_FALLBACK=qwen-plus
-DASHSCOPE_ENABLE_THINKING=0
-DASHSCOPE_THINKING_BUDGET=1200
+## Fork 后首次部署
 
-AI_KEY_SECRET=          # 用户自带 Key（BYOK）的加密密钥；openssl rand -hex 32 生成；上线后不可更改
-ADMIN_PASSWORD=          # 管理后台 /admin，留空则后台不可用
-```
+从 [GitHub 仓库](https://github.com/Rskyss/funds) 下载源码后，除 `.env` 外还需准备 **Supabase 数据库**。仓库内**没有**一份「一键建全库」的 SQL，需自行建表或参考 `docs/qdii-supabase接入/DESIGN_qdii-supabase接入.md` 中的表结构说明。
 
-更多可选项见 `.env.example`（如 Agent 轮次、Tavily 搜索、数据更新时间等）。全新 Supabase 环境还需执行 `docs/ai-热议推荐/migration.sql`，并为 `fund_ai_summary` 增加详情点评字段（见 [CHANGELOG · v1.4](CHANGELOG.md#140---2026-05-20)）。**v1.6 为 `user_profile` 新增 `ai_api_key_cipher`/`ai_chat_model`/`ai_review_model` 三列（用户自带 Key）**，升级时需执行对应增列 SQL（见 [CHANGELOG · v1.6](CHANGELOG.md#160---2026-06-25)）。
+**建议顺序：**
 
-请勿将 `.env` 提交到 Git；真实密钥只放在本地 `.env` 中。
+1. 创建 Supabase 项目，拿到 URL 与两个 Key
+2. 建核心表：`funds`、`nav_history`、`fund_details`、`fund_ai_summary`、`favorites`、`user_profile`、`invite_codes` 等（字段见 `docs/qdii-supabase接入/DESIGN_qdii-supabase接入.md`）
+3. **v1.6 必做**：`user_profile` 增加 `ai_api_key_cipher`、`ai_chat_model`、`ai_review_model`（见 [CHANGELOG · v1.6](CHANGELOG.md#160---2026-06-25)）
+4. **向量检索（可选）**：执行 `docs/ai-热议推荐/migration.sql` 中的 `fund_doc_chunks` 与 `search_fund_doc_chunks` RPC
+5. **热议推荐（可选）**：同上的 `chat_hot_suggestions` 表
+6. 配置 `.env` → `npm run build` → `npm start`
+7. 打开首页，空库会自动抓取基金数据；生成邀请码：`npm run invite:gen`
+8. （可选）配 `DASHSCOPE_API_KEY` 后跑 `npm run ai:generate`、`npm run data:embed` 填充短长评与向量
+
+**不配置平台 Key 也能完成 1–7**，得到可用的基金浏览器 + BYOK 版 AI 投顾；短长评需用户自己生成或后续补跑脚本。
 
 ## 本地开发
 
@@ -111,7 +179,7 @@ npm run data:fees       # 回填费率与申购状态
 npm run data:embed      # 生成文档向量
 npm run ai:generate     # 批量生成 AI 基金短点评（列表卡片）
 npm run ai:detail       # 批量生成 AI 详情长点评（抽屉）
-npm run agent:test      # 运行 Agent 脚本用例
+npm run agent:test      # 运行 Agent 脚本用例（v1.6 起需登录用户已配置 Key，或自行改脚本带 Token）
 npm run invite:gen      # 生成邀请码
 npm run auth:reset-password  # 管理员重置用户密码（需 SUPABASE_SECRET_KEY）
 ```
