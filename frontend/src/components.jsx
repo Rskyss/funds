@@ -669,6 +669,8 @@ function FundDrawer({ fund, onClose, isFav, onFav, chatOpen, onOpenFund, onOpenC
     setDError(null);
     setFeeTab("buy");
     setAiExpanded(false);
+    setAiOverride(null);
+    setRegenErr("");
     const cached = readDetailCache(renderFund.code);
     setDetail(cached ? adaptDetail(cached, renderFund) : buildPreviewDetail(renderFund));
     setDRefreshing(!cached);
