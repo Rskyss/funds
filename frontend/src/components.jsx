@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import {
   QUICK_CHIPS,
 } from "./data.js";
-import { getToken, getSession } from "./auth.js";
+import { getToken, getSession, authedFetch } from "./auth.js";
 import { readDetailCache, writeDetailCache } from "./detailCache.js";
 // 清洗 AI 卡片点评：去掉模型可能带出来的「(42字)」字数标注与整句外包的引号
 function cleanAiSummary(s) {
@@ -604,7 +604,7 @@ function ManagerPanel({ managerId, onClose, onOpenFund }) {
 const DRAWER_ANIM_MS = 320;
 
 // ============== Detail Drawer ==============
-function FundDrawer({ fund, onClose, isFav, onFav, chatOpen, onOpenFund, onOpenChat, onCloseChat }) {
+function FundDrawer({ fund, onClose, isFav, onFav, chatOpen, onOpenFund, onOpenChat, onCloseChat, aiConfigured }) {
   const [renderFund, setRenderFund] = useState(null);
   const [active, setActive] = useState(false);
   const closeTimer = useRef(null);
@@ -614,6 +614,9 @@ function FundDrawer({ fund, onClose, isFav, onFav, chatOpen, onOpenFund, onOpenC
   const [dError, setDError] = useState(null);
   const [mgrId, setMgrId] = useState(null);
   const [aiExpanded, setAiExpanded] = useState(false);
+  const [aiOverride, setAiOverride] = useState(null); // { summary, detail }
+  const [regenBusy, setRegenBusy] = useState(false);
+  const [regenErr, setRegenErr] = useState("");
 
   const requestClose = useCallback(() => {
     if (!renderFund) return;
@@ -816,7 +819,9 @@ function FundDrawer({ fund, onClose, isFav, onFav, chatOpen, onOpenFund, onOpenC
 
           {/* AI 点评 */}
           {(() => {
-            const aiText = d.aiDetail || d.aiSummary || "";
+            const aiText = aiOverride
+              ? (aiOverride.detail || aiOverride.summary || "")
+              : (d.aiDetail || d.aiSummary || "");
             const isLong = !!d.aiDetail && aiText.length > 80;
             const bodyCls =
               "ai-summary__body" +
@@ -836,10 +841,26 @@ function FundDrawer({ fund, onClose, isFav, onFav, chatOpen, onOpenFund, onOpenC
                         {aiExpanded ? "收起" : "展开全文"}
                       </button>
                     )}
+                    {aiConfigured && (
+                      <button type="button" className="ai-summary__toggle" disabled={regenBusy}
+                        onClick={async () => {
+                          setRegenErr(""); setRegenBusy(true);
+                          try {
+                            const r = await authedFetch(`/api/fund/${fund.code}/ai-summary/preview`, { method: "POST", body: JSON.stringify({ long: true }) });
+                            const dd = await r.json();
+                            if (!r.ok) throw new Error(dd.error || "生成失败");
+                            setAiOverride({ summary: dd.summary, detail: dd.detail });
+                          } catch (err) { setRegenErr(err.message || "生成失败"); }
+                          finally { setRegenBusy(false); }
+                        }}>
+                        {regenBusy ? "生成中…" : "用我的模型重新生成"}
+                      </button>
+                    )}
                   </div>
                   <div className={bodyCls}>
                     <p>{cleanAiSummary(aiText)}</p>
                   </div>
+                  {regenErr && <p className="auth-modal__error">{regenErr}</p>}
                 </div>
               </section>
             );
