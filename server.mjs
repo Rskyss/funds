@@ -42,13 +42,16 @@ import {
   saveAiSummary,
   getUserProfile,
   saveUserProfile,
+  saveUserAiConfig,
+  clearUserAiConfig,
   findInviteCode,
   claimInviteCode,
   releaseInviteCode,
   attachInviteCodeUser,
   createInviteCodes,
 } from "./lib/store.mjs";
-import { generateWithRetry } from "./lib/ai.mjs";
+import { generateWithRetry, validateAiCredentials, generateFundSummary, generateFundDetailSummary } from "./lib/ai.mjs";
+import { encryptSecret, decryptSecret, maskSecret } from "./lib/crypto.mjs";
 import { publicConfig, supabaseAdmin } from "./lib/supabase.mjs";
 import { verifyToken } from "./lib/auth.mjs";
 import { signInWithEmailPassword, translateAuthError } from "./lib/authSignIn.mjs";
@@ -60,6 +63,24 @@ import { logChatTurn, rateLimit } from "./lib/agent/metrics.mjs";
 import { suggestionTemplates } from "./lib/agent/rules.mjs";
 import { getActiveHotSuggestions, maybeRefreshHotSuggestions } from "./lib/agent/hotTopics.mjs";
 import { formatDataUpdateDisplay, scheduledUpdateBefore } from "./lib/dataSchedule.mjs";
+
+// 读取登录用户的聊天凭证（apiKey + 投问模型）；未配置/解密失败返回 null。
+async function loadChatCreds(userId) {
+  if (!userId) return null;
+  const p = await getUserProfile(userId).catch(() => null);
+  if (!p?.ai_api_key_cipher || !p?.ai_chat_model) return null;
+  try { return { apiKey: decryptSecret(p.ai_api_key_cipher), model: p.ai_chat_model }; }
+  catch { return null; }
+}
+
+// 读取用户的点评凭证（apiKey + 短/长评模型）。
+async function loadReviewCreds(userId) {
+  if (!userId) return null;
+  const p = await getUserProfile(userId).catch(() => null);
+  if (!p?.ai_api_key_cipher || !p?.ai_review_model) return null;
+  try { return { apiKey: decryptSecret(p.ai_api_key_cipher), model: p.ai_review_model }; }
+  catch { return null; }
+}
 
 const PORT = Number(process.env.PORT || 5173);
 const ROOT = process.cwd();
@@ -528,6 +549,31 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    const previewMatch = url.pathname.match(/^\/api\/fund\/(\d{6})\/ai-summary\/preview$/);
+    if (previewMatch && req.method === "POST") {
+      const code = previewMatch[1];
+      const tokenUser = await verifyToken(req.headers["authorization"]).catch(() => null);
+      if (!tokenUser?.userId) { json(res, 401, { error: "请先登录" }); return; }
+      const creds = await loadReviewCreds(tokenUser.userId);
+      if (!creds) { json(res, 403, { error: "请先在「模型设置」中填写 API Key 与短/长评模型", code: "NO_AI_KEY" }); return; }
+      const funds = await getAllFunds();
+      const fund = funds.find((f) => f.code === code);
+      if (!fund) { json(res, 404, { error: "未找到该基金" }); return; }
+      const body = await readBody(req).catch(() => ({}));
+      try {
+        const card = await generateFundSummary(fund, { model: creds.model, apiKey: creds.apiKey });
+        let detail = null;
+        if (body.long === true) {
+          const d = await generateFundDetailSummary(fund, { model: creds.model, apiKey: creds.apiKey, cardSummary: card.summary });
+          detail = d.detail;
+        }
+        json(res, 200, { summary: card.summary, detail, model: creds.model, ephemeral: true });
+      } catch (err) {
+        json(res, 400, { error: `生成失败：${err.message}` });
+      }
+      return;
+    }
+
     if (url.pathname === "/api/chat/sessions" && req.method === "GET") {
       const tokenUser = await verifyToken(req.headers["authorization"]).catch(() => null);
       if (!tokenUser?.userId) {
@@ -598,7 +644,30 @@ const server = createServer(async (req, res) => {
         return;
       }
       const profile = await getUserProfile(tokenUser.userId);
-      json(res, 200, { profile });
+      let aiKeyMask = null;
+      if (profile?.ai_api_key_cipher) {
+        try { aiKeyMask = maskSecret(decryptSecret(profile.ai_api_key_cipher)); } catch { aiKeyMask = null; }
+      }
+      json(res, 200, {
+        profile: {
+          ...profile,
+          aiChatModel: profile?.ai_chat_model || null,
+          aiReviewModel: profile?.ai_review_model || null,
+          aiKeyMask,
+          aiConfigured: !!(profile?.ai_api_key_cipher && profile?.ai_chat_model),
+        },
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/profile/ai/validate" && req.method === "POST") {
+      const tokenUser = await verifyToken(req.headers["authorization"]).catch(() => null);
+      if (!tokenUser?.userId) { json(res, 401, { error: "请先登录" }); return; }
+      const body = await readBody(req);
+      const key = typeof body.aiApiKey === "string" ? body.aiApiKey.trim() : "";
+      if (!key) { json(res, 400, { error: "请填写 API Key" }); return; }
+      const check = await validateAiCredentials({ apiKey: key, model: "qwen-plus" });
+      json(res, check.ok ? 200 : 400, check.ok ? { ok: true } : { ok: false, error: check.error });
       return;
     }
 
@@ -609,6 +678,31 @@ const server = createServer(async (req, res) => {
         return;
       }
       const body = await readBody(req);
+      if (body.clearAiKey === true) {
+        await clearUserAiConfig(tokenUser.userId);
+        json(res, 200, { ok: true, aiConfigured: false });
+        return;
+      }
+      if (body.aiApiKey !== undefined || body.aiChatModel !== undefined || body.aiReviewModel !== undefined) {
+        const chatModel = typeof body.aiChatModel === "string" ? body.aiChatModel.trim() : "";
+        const reviewModel = typeof body.aiReviewModel === "string" ? body.aiReviewModel.trim() : "";
+        if (!chatModel || !reviewModel) { json(res, 400, { error: "请填写投问模型与短/长评模型" }); return; }
+        const existing = await getUserProfile(tokenUser.userId).catch(() => null);
+        let cipher = existing?.ai_api_key_cipher || null;
+        let plainKey = null;
+        if (typeof body.aiApiKey === "string" && body.aiApiKey.trim()) {
+          plainKey = body.aiApiKey.trim();
+          cipher = encryptSecret(plainKey);
+        } else if (cipher) {
+          try { plainKey = decryptSecret(cipher); } catch { plainKey = null; }
+        }
+        if (!plainKey || !cipher) { json(res, 400, { error: "请先填写 API Key" }); return; }
+        const check = await validateAiCredentials({ apiKey: plainKey, model: chatModel });
+        if (!check.ok) { json(res, 400, { error: `投问模型校验失败：${check.error}` }); return; }
+        await saveUserAiConfig(tokenUser.userId, { cipher, chatModel, reviewModel });
+        json(res, 200, { ok: true, aiConfigured: true, aiChatModel: chatModel, aiReviewModel: reviewModel, aiKeyMask: maskSecret(plainKey) });
+        return;
+      }
       const RISK = ["low", "mid", "high"];
       const HORIZON = ["short", "mid", "long"];
       const AMOUNT = ["<10w", "10-50w", "50-200w", ">200w"];
@@ -652,6 +746,17 @@ const server = createServer(async (req, res) => {
       }
       const history = Array.isArray(session.state.messages) ? session.state.messages : [];
       const userProfile = userId ? await getUserProfile(userId).catch(() => null) : null;
+      const chatCreds = await loadChatCreds(userId);
+      if (!chatCreds) {
+        if (wantStream) {
+          res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-store", connection: "keep-alive", "x-accel-buffering": "no" });
+          res.write(`event: error\ndata: ${JSON.stringify({ message: "请先在「模型设置」中填写你的百炼 API Key", code: "NO_AI_KEY" })}\n\n`);
+          res.end();
+        } else {
+          json(res, 403, { error: "请先在「模型设置」中填写你的百炼 API Key", code: "NO_AI_KEY" });
+        }
+        return;
+      }
       const turnStart = Date.now();
 
       if (wantStream) {
@@ -677,6 +782,7 @@ const server = createServer(async (req, res) => {
             lastCodes: session.state.lastCodes || [],
             lastFilters: session.state.lastFilters || null,
             profile: userProfile,
+            creds: chatCreds,
           });
           console.log("[plan]", JSON.stringify({
             intent: planResult.intent,
@@ -704,6 +810,7 @@ const server = createServer(async (req, res) => {
             profile: userProfile,
             onDelta: (delta) => send("delta", { text: delta }),
             onReasoningDelta: (delta) => send("thinking", { text: delta }),
+            creds: chatCreds,
           });
           if (!synth.ok) {
             const fallback = synth.error?.includes("AllocationQuota.FreeTierOnly")
@@ -765,10 +872,11 @@ const server = createServer(async (req, res) => {
         lastCodes: session.state.lastCodes || [],
         lastFilters: session.state.lastFilters || null,
         profile: userProfile,
+        creds: chatCreds,
       });
 
       const state = await runPlan(planResult);
-      let synth = await synthesize({ user: userMessage, history, state, profile: userProfile });
+      let synth = await synthesize({ user: userMessage, history, state, profile: userProfile, creds: chatCreds });
       if (!synth.ok) {
         synth = {
           ...synth,
