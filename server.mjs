@@ -648,9 +648,11 @@ const server = createServer(async (req, res) => {
       if (profile?.ai_api_key_cipher) {
         try { aiKeyMask = maskSecret(decryptSecret(profile.ai_api_key_cipher)); } catch { aiKeyMask = null; }
       }
+      // 绝不把加密密文下发前端：剥掉 ai_api_key_cipher 再返回
+      const { ai_api_key_cipher, ...safeProfile } = profile || {};
       json(res, 200, {
         profile: {
-          ...profile,
+          ...safeProfile,
           aiChatModel: profile?.ai_chat_model || null,
           aiReviewModel: profile?.ai_review_model || null,
           aiKeyMask,
