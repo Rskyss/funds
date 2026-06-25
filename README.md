@@ -65,10 +65,11 @@ DASHSCOPE_MODEL_STRONG_FALLBACK=qwen-plus
 DASHSCOPE_ENABLE_THINKING=0
 DASHSCOPE_THINKING_BUDGET=1200
 
+AI_KEY_SECRET=          # 用户自带 Key（BYOK）的加密密钥；openssl rand -hex 32 生成；上线后不可更改
 ADMIN_PASSWORD=          # 管理后台 /admin，留空则后台不可用
 ```
 
-更多可选项见 `.env.example`（如 Agent 轮次、Tavily 搜索、数据更新时间等）。全新 Supabase 环境还需执行 `docs/ai-热议推荐/migration.sql`，并为 `fund_ai_summary` 增加详情点评字段（见 [CHANGELOG · v1.4](CHANGELOG.md#140---2026-05-20)）。**v1.5 无新增表结构。**
+更多可选项见 `.env.example`（如 Agent 轮次、Tavily 搜索、数据更新时间等）。全新 Supabase 环境还需执行 `docs/ai-热议推荐/migration.sql`，并为 `fund_ai_summary` 增加详情点评字段（见 [CHANGELOG · v1.4](CHANGELOG.md#140---2026-05-20)）。**v1.6 为 `user_profile` 新增 `ai_api_key_cipher`/`ai_chat_model`/`ai_review_model` 三列（用户自带 Key）**，升级时需执行对应增列 SQL（见 [CHANGELOG · v1.6](CHANGELOG.md#160---2026-06-25)）。
 
 请勿将 `.env` 提交到 Git；真实密钥只放在本地 `.env` 中。
 
@@ -138,6 +139,8 @@ PORT=3002 npm start   # 或使用 PM2：pm2 start npm --name funds -- start
 ```
 
 Nginx 将站点根目录指向 `public/`，`/api` 与页面请求反代到 Node 进程（默认监听 `127.0.0.1:PORT`）。静态 `.js`/`.css` 需能从 `public/assets/` 正确加载。
+
+> **从 1.5 升级到 1.6**：先在 Supabase 给 `user_profile` 增三列（见 CHANGELOG v1.6），再在服务器 `.env` 补 `AI_KEY_SECRET`（上线后不可更改），然后 `npm run build` → 同步 `public/` 与后端 → `pm2 restart funds`。
 
 ## 数据说明
 
