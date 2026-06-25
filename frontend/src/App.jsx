@@ -13,6 +13,7 @@ import {
 } from "./components.jsx";
 import { QUICK_CHIPS } from "./data.js";
 import AuthModal from "./AuthModal.jsx";
+import AiSettingsModal from "./AiSettingsModal.jsx";
 import { init as initAuth, onAuthChange, signOut, getSession, authedFetch } from "./auth.js";
 import { readFundsCache, writeFundsCache } from "./fundsCache.js";
 
@@ -82,6 +83,8 @@ function App() {
   const [favOnly, setFavOnly] = useState(false);
   const [session, setSession] = useState(null);
   const [authModal, setAuthModal] = useState(null); // null | "login" | "register"
+  const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
+  const [aiConfigured, setAiConfigured] = useState(false);
 
   useEffect(() => {
     initAuth();
@@ -97,6 +100,12 @@ function App() {
       .then((d) => { if (alive) setFavs(new Set(d.favorites || [])); })
       .catch(() => {});
     return () => { alive = false; };
+  }, [session]);
+
+  useEffect(() => {
+    if (!session) { setAiConfigured(false); return; }
+    authedFetch("/api/profile").then((r) => r.json())
+      .then((d) => setAiConfigured(!!d?.profile?.aiConfigured)).catch(() => setAiConfigured(false));
   }, [session]);
   const [openFund, setOpenFund] = useState(null);
   const [chatOpen, setChatOpen] = useState(false);
@@ -237,6 +246,7 @@ function App() {
         session={session}
         onLogin={() => setAuthModal("login")}
         onLogout={signOut}
+        onOpenAiSettings={() => setAiSettingsOpen(true)}
       />
       <main className="shell">
         <Hero boards={boards} selected={themeSel} onSelect={toggleTheme} total={meta.total} updatedText={meta.fetchedAtText}/>
@@ -326,6 +336,7 @@ function App() {
         onOpenFund={openFundByCode}
         onOpenChat={() => { if (!session) { setAuthModal("login"); } else { setChatContextFund(openFund); setChatOpen(true); } }}
         onCloseChat={() => setChatOpen(false)}
+        aiConfigured={aiConfigured}
       />
 
       <AIDrawer
@@ -339,6 +350,8 @@ function App() {
         contextFund={chatContextFund}
         onClearContext={() => setChatContextFund(null)}
         onNewSession={() => { setOpenFund(null); setChatContextFund(null); }}
+        aiConfigured={aiConfigured}
+        onOpenAiSettings={() => setAiSettingsOpen(true)}
       />
 
       <AuthModal
@@ -347,6 +360,12 @@ function App() {
         onClose={() => setAuthModal(null)}
         onSwitch={(m) => setAuthModal(m)}
         onSuccess={() => setAuthModal(null)}
+      />
+
+      <AiSettingsModal
+        open={aiSettingsOpen}
+        onClose={() => setAiSettingsOpen(false)}
+        onSaved={(ok) => setAiConfigured(ok)}
       />
 
     </>

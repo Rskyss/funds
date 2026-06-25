@@ -103,7 +103,7 @@ function Sparkline({
 }
 
 // ============== Top bar ==============
-function TopBar({ onOpenChat, session, onLogin, onLogout }) {
+function TopBar({ onOpenChat, session, onLogin, onLogout, onOpenAiSettings }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const email = session?.user?.email || "";
   const initial = email ? email[0].toUpperCase() : "?";
@@ -147,6 +147,9 @@ function TopBar({ onOpenChat, session, onLogin, onLogout }) {
               {menuOpen && (
                 <div className="avatar-menu__pop" onClick={(e) => e.stopPropagation()}>
                   <div className="avatar-menu__email">{email}</div>
+                  <button className="avatar-menu__item" onClick={() => { setMenuOpen(false); onOpenAiSettings?.(); }}>
+                    模型设置
+                  </button>
                   <button className="avatar-menu__item" onClick={() => { setMenuOpen(false); onLogout?.(); }}>
                     退出登录
                   </button>
@@ -1565,7 +1568,7 @@ function buildSuggestions(data, n = 6) {
   return [...hot, ...filler].slice(0, n);
 }
 
-function AIDrawer({ open, onClose, onOpenFund, openFundCode, fundDrawerOpen, loggedIn, onRequireLogin, contextFund, onClearContext, onNewSession }) {
+function AIDrawer({ open, onClose, onOpenFund, openFundCode, fundDrawerOpen, loggedIn, onRequireLogin, contextFund, onClearContext, onNewSession, aiConfigured, onOpenAiSettings }) {
   const [view, setView] = useState("empty"); // "empty" | "chat" | "history"
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState([]);
@@ -1763,6 +1766,15 @@ function AIDrawer({ open, onClose, onOpenFund, openFundCode, fundDrawerOpen, log
             <p>AI 投顾会结合你的偏好与历史会话给出可解释的研究依据，需要登录后使用。</p>
             <button className="btn btn--primary ai-gate__btn" onClick={onRequireLogin}>登录 / 注册</button>
           </div>
+        ) : !aiConfigured ? (
+          <div className="ai-gate">
+            <div className="ai-gate__icon">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M12 2a3 3 0 0 0-3 3v3a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 11v1a7 7 0 0 1-14 0v-1M12 19v3"/></svg>
+            </div>
+            <h3>填写你的百炼 API Key 后即可使用</h3>
+            <p>AI 问答使用你自己的阿里云百炼 API Key 与模型。点下方按钮在「模型设置」中填写后即可提问。</p>
+            <button className="btn btn--primary ai-gate__btn" onClick={onOpenAiSettings}>去设置</button>
+          </div>
         ) : view === "history" ? (
           <HistoryView
             sessions={sessions}
@@ -1798,17 +1810,17 @@ function AIDrawer({ open, onClose, onOpenFund, openFundCode, fundDrawerOpen, log
             <button className="aiform__ctx-x" onClick={onClearContext} aria-label="移除上下文">×</button>
           </div>
         )}
-        <form className="aiform" onSubmit={(e) => { e.preventDefault(); if (!loggedIn) { onRequireLogin && onRequireLogin(); return; } sendMsg(); }}>
+        <form className="aiform" onSubmit={(e) => { e.preventDefault(); if (!loggedIn || !aiConfigured) { if (!loggedIn) onRequireLogin?.(); else onOpenAiSettings?.(); return; } sendMsg(); }}>
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder={!loggedIn ? "登录后即可提问" : busy ? "正在回答…" : "输入你的问题"}
+            placeholder={!loggedIn ? "登录后即可提问" : !aiConfigured ? "填写 API Key 后即可提问" : busy ? "正在回答…" : "输入你的问题"}
             rows={1}
             maxLength={500}
-            disabled={busy || !loggedIn}
-            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!loggedIn) { onRequireLogin && onRequireLogin(); return; } sendMsg(); } }}
+            disabled={busy || !loggedIn || !aiConfigured}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!loggedIn || !aiConfigured) { if (!loggedIn) onRequireLogin?.(); else onOpenAiSettings?.(); return; } sendMsg(); } }}
           />
-          <button type="submit" className="aiform__send" aria-label="发送" disabled={busy || !loggedIn}>
+          <button type="submit" className="aiform__send" aria-label="发送" disabled={busy || !loggedIn || !aiConfigured}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
           </button>
         </form>
