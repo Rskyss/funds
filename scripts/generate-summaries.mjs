@@ -1,5 +1,5 @@
 import { getAllFunds, getAllAiSummaries, saveAiSummary } from "../lib/store.mjs";
-import { generateWithRetry } from "../lib/ai.mjs";
+import { generateWithRetry, modelChain } from "../lib/ai.mjs";
 
 const CONCURRENCY = Number(process.env.AI_CONCURRENCY || 5);
 const FORCE = process.argv.includes("--force");
@@ -45,7 +45,7 @@ async function main() {
     console.error("缺少 DASHSCOPE_API_KEY，请在 .env 配置");
     process.exit(1);
   }
-  console.log(`百炼模型：${process.env.DASHSCOPE_MODEL || "qwen-plus"}`);
+  console.log(`百炼模型链（按序自动降级）：${modelChain().join(" → ")}`);
   console.log(`并发：${CONCURRENCY}${FORCE ? " · 强制重生成" : ""}${LIMIT ? " · 限制 " + LIMIT + " 只" : ""}\n`);
 
   console.log("加载基金列表与已有点评...");

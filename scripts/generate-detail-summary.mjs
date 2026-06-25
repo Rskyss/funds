@@ -1,5 +1,5 @@
 import { getAllFunds, getAllAiSummaries, saveAiDetailSummary } from "../lib/store.mjs";
-import { generateDetailWithRetry } from "../lib/ai.mjs";
+import { generateDetailWithRetry, modelChain } from "../lib/ai.mjs";
 
 const CONCURRENCY = Number(process.env.AI_CONCURRENCY || 3);
 const FORCE = process.argv.includes("--force");
@@ -49,8 +49,7 @@ async function main() {
     console.error("缺少 DASHSCOPE_API_KEY，请在 .env 配置");
     process.exit(1);
   }
-  const modelLabel = process.env.DASHSCOPE_MODEL_STRONG || process.env.DASHSCOPE_MODEL || "qwen-plus";
-  console.log(`百炼模型：${modelLabel}（详情扩展点评）`);
+  console.log(`百炼模型链（按序自动降级）：${modelChain().join(" → ")}（详情扩展点评）`);
   console.log(
     `并发：${CONCURRENCY}` +
       `${FORCE ? " · 强制重生成" : ""}` +
