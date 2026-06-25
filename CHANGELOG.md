@@ -4,6 +4,35 @@
 
 ---
 
+## [1.6.0] - 2026-06-25
+
+### 新增
+
+- **用户自带百炼 Key（BYOK）+ 每用户模型设置**：每个登录用户在头像菜单「模型设置」里配置三项——百炼 API Key、投问模型、短/长评模型。弹窗渐进式：先填 Key 点「验证 Key」，通过后才展开两个模型输入框；保存时会真实调用两个模型校验可用性，填错当场提示（`frontend/src/AiSettingsModal.jsx`、`server.mjs`）。
+- **聊天投问改为自带 Key**：未配置 Key 的用户聊天禁用并显示「去设置」引导；已配置则用各自的 Key + 投问模型问答（非流式 403 / 流式 SSE `error` 事件，统一 `code: NO_AI_KEY`）。理解问题与生成回答全链路按用户单模型执行，不再走平台多模型降级（`lib/agent/planner.mjs`、`lib/agent/synth.mjs`）。
+- **详情「用我的模型重新生成点评」**：已配置 Key 的用户可在基金详情用自己的 Key + 短/长评模型当场重生成短评/长评，仅本人可见、**不落库**，刷新即回到全站共享版（`POST /api/fund/:code/ai-summary/preview`）。
+- **凭证安全**：用户 Key 经 **AES-256-GCM** 加密后存库（`lib/crypto.mjs`），后端永不向前端返回明文或密文，仅下发掩码（如 `sk-****abcd`）+ 模型名 + 配置状态。
+
+### 变更
+
+- 全站共享的短/长评（已预生成的 734 份）、向量检索、批量生成等**平台侧 AI 仍用后台 Key**，不受用户配置影响；普通访客无需配置即可浏览共享点评。
+- `lib/ai.mjs` 的 `chatCompletion` / `chatCompletionStream` / `generateFundSummary` / `generateFundDetailSummary` 新增可选 `apiKey` 入参（缺省回退平台 env，行为不变）；新增 `validateAiCredentials` 校验函数。
+
+### 数据库
+
+- `user_profile` 新增三列：`ai_api_key_cipher`（加密密文）、`ai_chat_model`（投问模型）、`ai_review_model`（短/长评模型）。
+
+### 配置
+
+- 新增环境变量 `AI_KEY_SECRET`：64 位 hex（`openssl rand -hex 32`），用于加密用户 Key。**上线后不可更改**，否则已存的用户 Key 将无法解密。
+
+### 说明
+
+- 上线步骤：Supabase 执行 `user_profile` 增列 SQL → 服务器 `.env` 补 `AI_KEY_SECRET` → `npm run build` → 同步 `public/` 与后端 → `pm2 restart funds`。
+- 安全提醒：`user_profile` 现存有加密 Key，建议核对其 RLS 仅允许「读自己那行」，避免公开 Key 越权读取（详见部署文档）。
+
+---
+
 ## [1.5.1] - 2026-06-12
 
 ### 修复

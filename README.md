@@ -1,6 +1,6 @@
 # QDII 基金罗盘
 
-**当前版本：1.5.0** · [更新记录](CHANGELOG.md)
+**当前版本：1.6.0** · [更新记录](CHANGELOG.md)
 
 本地运行的 QDII 基金查询、筛选、对比与 AI 问答 Web 应用。前端为 **Vite + React**（源码在 `frontend/`），后端为 Node.js HTTP 服务；数据持久化在 Supabase Postgres，基金数据主要来自东方财富 / 天天基金公开页面，AI 能力通过阿里云百炼 DashScope（OpenAI 兼容接口）调用。
 
@@ -15,6 +15,7 @@
 - 收藏、自选与登录态管理（邀请码注册；登录走服务端 `/api/auth/signin`，错误提示中文化）
 - AI 基金短点评 / 详情长点评批量生成（`npm run ai:generate`、`npm run ai:detail`）
 - 聊天式 Agent：筛选、比较、概念解释、事件问答、持仓关键词检索；开场 **2 条 🔥 热议 + 4 条固定推荐**；流式思考过程可折叠查看
+- **用户自带百炼 Key（BYOK）**：每个登录用户在「模型设置」里填自己的 API Key + 投问模型 + 短/长评模型（先验证 Key 再展开模型）；聊天投问用各自的 Key，未配置则禁用并引导；详情可「用我的模型重新生成点评」（临时、不落库）；Key 经 AES-256-GCM 加密存储、不回显
 - 管理后台 `/admin`：用户、邀请码、对话记录（需配置 `ADMIN_PASSWORD`）
 
 尚未迁移的能力见 [CHANGELOG.md · 已知限制](CHANGELOG.md#150---2026-05-20)。
@@ -38,7 +39,8 @@ outputs/            # 生成的报告（Git 忽略）
 
 - 推荐 Node.js 20+（使用原生 `fetch` 与 `node --env-file`）
 - 已配置好表结构与 RPC 的 Supabase 项目
-- 使用 AI 点评、向量检索或聊天时需配置 DashScope API Key
+- 平台侧 AI 点评、向量检索、批量生成需配置 DashScope API Key（聊天投问改由用户自带 Key）
+- 启用用户自带 Key（BYOK）需配置 `AI_KEY_SECRET`（`openssl rand -hex 32` 生成的 64 位 hex，用于加密用户 Key，上线后不可更改）
 
 ## 安装与配置
 

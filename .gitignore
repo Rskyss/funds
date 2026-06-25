@@ -6,6 +6,7 @@ node_modules/
 outputs/
 .claude/
 .cursor/
+.superpowers/
 fund/
 lib/stock analysis/
 yt-scribe-clone/
