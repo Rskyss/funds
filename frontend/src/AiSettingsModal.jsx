@@ -87,7 +87,7 @@ export default function AiSettingsModal({ open, onClose, onSaved }) {
           <label className="auth-modal__field">
             <span>百炼 API Key{configured && mask ? `（已保存：${mask}，留空=不修改）` : ""}</span>
             <input type="password" autoComplete="off" value={apiKey}
-              onChange={(e) => { setApiKey(e.target.value); if (!configured) setValidated(false); }}
+              onChange={(e) => { const v = e.target.value; setApiKey(v); setValidated(v.trim() ? false : configured); }}
               placeholder={configured ? "留空则沿用已保存的 Key" : "sk-..."} />
           </label>
           {!validated && (
