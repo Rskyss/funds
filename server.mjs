@@ -701,6 +701,10 @@ const server = createServer(async (req, res) => {
         if (!plainKey || !cipher) { json(res, 400, { error: "请先填写 API Key" }); return; }
         const check = await validateAiCredentials({ apiKey: plainKey, model: chatModel });
         if (!check.ok) { json(res, 400, { error: `投问模型校验失败：${check.error}` }); return; }
+        if (reviewModel !== chatModel) {
+          const checkReview = await validateAiCredentials({ apiKey: plainKey, model: reviewModel });
+          if (!checkReview.ok) { json(res, 400, { error: `短/长评模型校验失败：${checkReview.error}` }); return; }
+        }
         await saveUserAiConfig(tokenUser.userId, { cipher, chatModel, reviewModel });
         json(res, 200, { ok: true, aiConfigured: true, aiChatModel: chatModel, aiReviewModel: reviewModel, aiKeyMask: maskSecret(plainKey) });
         return;
