@@ -16,6 +16,7 @@ import AuthModal from "./AuthModal.jsx";
 import AiSettingsModal from "./AiSettingsModal.jsx";
 import { init as initAuth, onAuthChange, signOut, getSession, authedFetch } from "./auth.js";
 import { readFundsCache, writeFundsCache } from "./fundsCache.js";
+import { track, trackPageViewOnce, trackSearch } from "./track.js";
 
 const ACCENT = "#3480F4";
 
@@ -146,6 +147,17 @@ function App() {
       });
     return () => { alive = false; };
   }, []);
+
+  // ===== 匿名行为埋点（页面浏览 / 打开基金 / 搜索 / 筛选）=====
+  useEffect(() => { trackPageViewOnce(); }, []);
+  useEffect(() => { if (openFund?.code) track("fund_open", { code: openFund.code }); }, [openFund?.code]);
+  useEffect(() => { trackSearch(q); }, [q]);
+  useEffect(() => {
+    if (!activeChip) return;
+    const chip = QUICK_CHIPS.find((c) => c.id === activeChip);
+    track("filter", { label: chip?.label || activeChip });
+  }, [activeChip]);
+  useEffect(() => { if (themeSel) track("filter", { label: themeSel }); }, [themeSel]);
 
   // apply accent
   useEffect(() => {

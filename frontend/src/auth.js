@@ -68,12 +68,12 @@ export async function init() {
   return supabase;
 }
 
-export async function signUp(email, password, inviteCode) {
+export async function signUp(email, password) {
   const normalizedEmail = (email || "").trim().toLowerCase();
   const res = await fetch("/api/auth/signup", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email: normalizedEmail, password, inviteCode }),
+    body: JSON.stringify({ email: normalizedEmail, password }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(translateAuthError(data.error) || "注册失败");

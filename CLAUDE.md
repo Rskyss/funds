@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概览
 
-QDII 基金罗盘：本地运行的 QDII 基金查询/筛选/对比/AI 点评/聊天 Agent 的 Web 应用。当前版本 **1.5.0**：
+QDII 基金罗盘：本地运行的 QDII 基金查询/筛选/对比/AI 点评/聊天 Agent 的 Web 应用。当前版本 **1.6.0**（引入 BYOK：用户自带百炼 Key + 每用户模型设置）：
 
 - 前端：Vite + React 18，源码在 `frontend/`，`npm run build` 产出到 `public/`
 - 后端：Node 原生 HTTP 服务（`server.mjs`），无框架
@@ -37,13 +37,18 @@ npm run data:managers                    # 基金经理
 npm run data:fees                        # 费率与申购状态
 npm run data:embed                       # 文档向量
 
-# AI / Agent / 邀请码
-npm run ai:generate                      # 批量生成 AI 短点评（全部）
+# AI / Agent
+npm run ai:generate                      # 批量生成列表 AI 短点评（全部）
 npm run ai:generate -- --limit 10        # 仅生成前 10 只
 npm run ai:generate -- --force           # 重新生成所有（覆盖已存在）
 AI_CONCURRENCY=8 npm run ai:generate     # 调整并发（默认 5）
+npm run ai:detail                        # 生成详情页长点评（generate-detail-summary.mjs）
 npm run agent:test                       # 跑 scripts/test-agent-cases.mjs 的聊天用例
-npm run invite:gen                       # 生成邀请码写入 invite_codes
+
+# 运维脚本
+npm run invite:gen                       # 生成邀请码写入 invite_codes（注册已不强制邀请码，仅后台留用）
+npm run invite:gen -- 10                 # 一次生成 10 个
+npm run auth:reset-password              # 重置某用户密码（reset-user-password.mjs）
 ```
 
 所有 Node 脚本都通过 `node --env-file=.env` 加载环境变量，**无需** 第三方 dotenv。改 `.env` 后必须重启服务。改 `frontend/` 源码后需要重新 `npm run build`（或用 `npm run dev` 热更新）。
@@ -56,14 +61,17 @@ npm run invite:gen                       # 生成邀请码写入 invite_codes
 
 - `SUPABASE_URL` / `SUPABASE_SECRET_KEY` — 服务端写入和 Auth 管理用（`supabaseAdmin`）
 - `SUPABASE_PUBLISHABLE_KEY` — 通过 `/api/config` 下发给前端，仅做匿名读和登录
-- `DASHSCOPE_API_KEY` — 走 AI 点评 / 聊天 Agent / 向量生成时必填
+- `AI_KEY_SECRET` — **BYOK 用**：加解密每用户的百炼 Key（`lib/crypto.mjs`，存进 `user_profile.ai_api_key_cipher`）。改这个值会让已存的用户 Key 全部解不开
+- `DASHSCOPE_API_KEY` — 平台级 Key，用于**批量脚本**（短/长点评、向量生成）和未配 BYOK 时的兜底；聊天 Agent 现在**优先用用户自带 Key**
+- `DASHSCOPE_CHAT_MODELS` — 逗号分隔的聊天模型顺位列表，第一个不可用自动顺位降级（见 `lib/ai.mjs`）
 - `DASHSCOPE_MODEL` / `DASHSCOPE_MODEL_FAST` / `DASHSCOPE_MODEL_STRONG` / `DASHSCOPE_MODEL_STRONG_FALLBACK` — 不同任务（合成、规划、强模型、降级）用不同模型
 - `DASHSCOPE_ENABLE_THINKING` / `DASHSCOPE_THINKING_BUDGET` — Qwen 思考模式开关与预算
 - `AGENT_MAX_TURNS` — Agent 最多轮次（默认 12）
 - `TAVILY_API_KEY` — 留空则事件类问题降级
 - `DATA_UPDATE_TIME` — 首页「更新时间」展示对齐的定时批次（默认 `07:00` Asia/Shanghai）
+- `ADMIN_PASSWORD` — 后台管理（`/api/admin/*` + 前端 `Admin.jsx`）登录口令；未配置则后台接口返回 503
 
-缺 Supabase 变量服务会启动失败（`lib/supabase.mjs` 顶层抛错）；缺 DashScope 变量只在调用 AI 路径时失败。
+缺 Supabase 变量服务会启动失败（`lib/supabase.mjs` 顶层抛错）；缺 DashScope/`AI_KEY_SECRET` 变量只在调用对应 AI 路径时失败。
 
 ## 架构
 
@@ -83,12 +91,15 @@ Node http server (server.mjs)
    ├─ lib/ai.mjs            — DashScope 调用（OpenAI 兼容端点 + 重试 + 多模型路由）
    ├─ lib/embedding.mjs     — 文档向量化（fund 文档检索）
    ├─ lib/dataSchedule.mjs  — 定时批次时间对齐与启动自检补刷
+   ├─ lib/crypto.mjs        — BYOK 用户 Key 加解密 / 掩码（encryptSecret/decryptSecret/maskSecret）
    └─ lib/agent/*           — 聊天 Agent：planner / session / tools / synth / rules ...
         ↓
 Supabase Postgres + Auth
 ```
 
-前端 SDK 仅用于登录拿 `access_token`，所有业务读写走自家 `/api/*`，token 由 `Authorization` 头透传给服务端，用 admin client 校验。注册走 `/api/auth/signup` 是为了用 admin API 绕过邮箱验证 + 校验邀请码。
+前端 SDK 仅用于登录拿 `access_token`，所有业务读写走自家 `/api/*`，token 由 `Authorization` 头透传给服务端，用 admin client 校验。注册走 `/api/auth/signup` 是为了用 admin API 绕过邮箱验证（`email_confirm: true`）。**注册现在只校验邮箱+密码，开放注册，不再要邀请码**（早期的邀请码校验已移除，`invite_codes` 表与函数仅后台统计/留用）。
+
+**API 面（`server.mjs`）**：业务 `/api/funds`、`/api/fund/:code`、`/api/chat?stream=1`（SSE）、`/api/profile`、`/api/profile/ai/validate`（BYOK 存 Key 前校验）、`/api/favorites`、`/api/events`（前端 `track.js` 匿名埋点上报）；后台 `/api/admin/*`（login/verify/stats/behavior/users/invites/chats，用内存 token + `ADMIN_PASSWORD`）。
 
 ### 表与 RLS（与代码强绑定）
 
@@ -97,10 +108,11 @@ Supabase Postgres + Auth
 - `fund_details`：F10 投资目标/范围/基准缓存（首次访问时按需抓取并落库）
 - `fund_ai_summary`：AI 点评缓存（主键 `code`），与 funds 1:1
 - `favorites`：唯一键 `(user_id, code)`，**开 RLS**（`auth.uid() = user_id`）
-- `user_profiles`：用户画像（含 `fund_years` 等）
-- `invite_codes`：邀请码（`code` / `status` / `expires_at` / `used_at` / `used_by`）
+- `user_profile`（**单数**，注意别写成 `user_profiles`）：用户画像（含 `fund_years` 等）；BYOK 列 `ai_api_key_cipher`（加密后的用户百炼 Key）/ `ai_chat_model` / `ai_review_model`
+- `events`：匿名行为埋点（前端 `track.js` → `/api/events` → `insertEvents`），后台行为分析用
+- `invite_codes`：邀请码（`code` / `status` / `expires_at` / `used_at` / `used_by`）——注册已不强制，仅后台统计与 `invite:gen` 留用
 
-`favorites` 与 `user_profiles` 走 RLS；其它表关 RLS 公开读。
+`favorites` 与 `user_profile` 走 RLS；其它表关 RLS 公开读。
 
 **字段命名规则**：DB `snake_case`（`fund_type`, `nav_date`, `return_1y`），JS `camelCase`（`fundType`, `date`, `return1y`）。所有转换集中在 `lib/store.mjs` 的 `fundToRow` / `rowToFund`。新增字段必须 Supabase migration、mapper、调用点三处同步。
 
@@ -129,7 +141,9 @@ Supabase Postgres + Auth
 - `compass.css` 全站样式（Inter + JetBrains Mono）
 - `auth.js` 封装 Supabase 登录、session 存 localStorage、`authedFetch` 注入 Bearer 头（401 自动清 session）
 - `fundsCache.js`（列表 7 天）/ `detailCache.js`（详情 24 小时）是浏览器本地缓存
-- `data.js` 是 API 调用层；`AuthModal.jsx` 是登录/注册/邀请码弹窗
+- `data.js` 是 API 调用层；`AuthModal.jsx` 是登录/注册弹窗（开放注册，无邀请码字段）
+- `AiSettingsModal.jsx` 是 BYOK「模型设置」弹窗（填/清自带百炼 Key、选短/长评模型）；`track.js` 是匿名行为埋点
+- `Admin.jsx` 是后台管理页（独立用 `ADMIN_PASSWORD` 登录，token 存 sessionStorage，**不走** Supabase Auth）
 - 构建后 `public/index.html` 引用 `public/assets/index-*.js|css`；不要手编 `public/`，会被 `npm run build` 覆盖
 
 ## 工作约定

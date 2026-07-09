@@ -37,6 +37,8 @@ import {
   getFavorites,
   addFavorite,
   removeFavorite,
+  insertEvents,
+  getEventsSince,
   getAllAiSummaries,
   getAiSummary,
   saveAiSummary,
@@ -961,7 +963,6 @@ const server = createServer(async (req, res) => {
       const body = await readBody(req);
       const email = (body.email || "").trim().toLowerCase();
       const password = body.password || "";
-      const inviteCode = (body.inviteCode || "").trim();
       if (!email || !email.includes("@")) {
         json(res, 400, { error: "邮箱格式不正确" });
         return;
@@ -970,42 +971,18 @@ const server = createServer(async (req, res) => {
         json(res, 400, { error: "密码至少 6 位" });
         return;
       }
-      if (!inviteCode) {
-        json(res, 400, { error: "请输入邀请码" });
-        return;
-      }
-      const invite = await findInviteCode(inviteCode);
-      if (!invite) {
-        json(res, 400, { error: "邀请码无效" });
-        return;
-      }
-      if (invite.status !== "unused") {
-        json(res, 400, { error: "邀请码已被使用" });
-        return;
-      }
-      if (invite.expires_at && new Date(invite.expires_at) < new Date()) {
-        json(res, 400, { error: "邀请码已过期" });
-        return;
-      }
-      const claimed = await claimInviteCode(inviteCode);
-      if (!claimed) {
-        json(res, 400, { error: "邀请码已被使用" });
-        return;
-      }
       const { data, error } = await supabaseAdmin.auth.admin.createUser({
         email,
         password,
         email_confirm: true,
       });
       if (error) {
-        await releaseInviteCode(inviteCode);
         const msg = error.message || "注册失败";
         const code = msg.includes("already") || msg.includes("registered") ? 409 : 400;
         json(res, code, { error: msg.includes("already") ? "该邮箱已注册" : msg });
         return;
       }
       const newUserId = data?.user?.id || null;
-      if (newUserId) await attachInviteCodeUser(inviteCode, newUserId);
       json(res, 200, { ok: true, userId: newUserId });
       return;
     }
@@ -1040,6 +1017,41 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    // ===== 匿名行为事件采集（公开；匿名可写，登录则带 user_id）=====
+    if (url.pathname === "/api/events" && req.method === "POST") {
+      const body = await readBody(req);
+      const list = Array.isArray(body.events) ? body.events : (body && body.type ? [body] : []);
+      if (!list.length) { json(res, 200, { ok: true, saved: 0 }); return; }
+      let userId = null;
+      try { const u = await verifyToken(req.headers["authorization"]); userId = u?.userId || null; } catch {}
+      const ALLOWED = new Set(["page_view", "fund_open", "search", "filter"]);
+      const clip = (s, n) => (typeof s === "string" ? s.slice(0, n) : null);
+      const rows = list.slice(0, 50)
+        .filter((e) => e && ALLOWED.has(e.type))
+        .map((e) => {
+          // payload 只保留白名单字段，绝不存敏感信息
+          let payload = null;
+          if (e.payload && typeof e.payload === "object") {
+            const p = {};
+            if (typeof e.payload.q === "string") p.q = e.payload.q.slice(0, 80);
+            if (typeof e.payload.label === "string") p.label = e.payload.label.slice(0, 40);
+            if (Object.keys(p).length) payload = p;
+          }
+          return {
+            anon_id: clip(e.anonId, 64),
+            user_id: userId,
+            type: e.type,
+            code: clip(e.code, 12),
+            payload,
+          };
+        });
+      if (rows.length) {
+        try { await insertEvents(rows); } catch (err) { console.warn("insertEvents 失败:", err.message); }
+      }
+      json(res, 200, { ok: true, saved: rows.length });
+      return;
+    }
+
     // ===== Admin API =====
     if (url.pathname === "/api/admin/login" && req.method === "POST") {
       const body = await readBody(req);
@@ -1060,17 +1072,223 @@ const server = createServer(async (req, res) => {
 
     if (url.pathname === "/api/admin/stats" && req.method === "GET") {
       if (!checkAdminToken(req)) { json(res, 401, { error: "未授权" }); return; }
-      const [usersRes, invitesRes, chatsRes] = await Promise.all([
+      const [usersRes, invitesRes, chatCountRes, chatRowsRes, favRes, profileRes] = await Promise.all([
         supabaseAdmin.auth.admin.listUsers({ perPage: 1000 }),
         supabaseAdmin.from("invite_codes").select("status"),
         supabaseAdmin.from("chat_logs").select("id", { count: "exact", head: true }),
+        supabaseAdmin.from("chat_logs")
+          .select("user_id, intent, ok, degraded, latency_ms, cards_count, created_at")
+          .order("created_at", { ascending: false })
+          .limit(10000),
+        supabaseAdmin.from("favorites").select("code"),
+        supabaseAdmin.from("user_profile").select("ai_api_key_cipher, ai_chat_model"),
       ]);
+
+      const users = usersRes.data?.users || [];
       const invites = invitesRes.data || [];
+      const chatRows = chatRowsRes.data || [];
+      const favRows = favRes.data || [];
+      const profiles = profileRes.data || [];
+
+      const now = Date.now();
+      const DAY = 86400000;
+      const dayKey = (d) => {
+        const dt = new Date(d);
+        return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+      };
+      const days = [];
+      for (let i = 13; i >= 0; i--) days.push(dayKey(now - i * DAY));
+      const emptyDayMap = () => Object.fromEntries(days.map((d) => [d, 0]));
+
+      // 注册趋势 + 近7天新增
+      const regMap = emptyDayMap();
+      let newUsers7d = 0;
+      for (const u of users) {
+        const k = dayKey(u.created_at);
+        if (k in regMap) regMap[k] += 1;
+        if (now - new Date(u.created_at).getTime() <= 7 * DAY) newUsers7d += 1;
+      }
+
+      // 对话趋势 / 活跃 / 意图 / 健康
+      const chatMap = emptyDayMap();
+      const activeByDay = Object.fromEntries(days.map((d) => [d, new Set()]));
+      const intentCount = {};
+      const chatUserIds = new Set();
+      const active7d = new Set();
+      let okCount = 0, degradedCount = 0, errorCount = 0;
+      const latencies = [];
+      let filterTotal = 0, filterZeroCard = 0;
+      for (const c of chatRows) {
+        const k = dayKey(c.created_at);
+        if (k in chatMap) chatMap[k] += 1;
+        if (c.user_id) {
+          chatUserIds.add(c.user_id);
+          if (activeByDay[k]) activeByDay[k].add(c.user_id);
+          if (now - new Date(c.created_at).getTime() <= 7 * DAY) active7d.add(c.user_id);
+        }
+        const it = c.intent || "未知";
+        intentCount[it] = (intentCount[it] || 0) + 1;
+        if (c.ok === false) errorCount += 1; else okCount += 1;
+        if (c.degraded) degradedCount += 1;
+        if (typeof c.latency_ms === "number") latencies.push(c.latency_ms);
+        if (c.intent === "filter") {
+          filterTotal += 1;
+          if ((c.cards_count || 0) === 0) filterZeroCard += 1;
+        }
+      }
+      const loaded = chatRows.length;
+
+      // 沉默用户（注册但从未对话）
+      const silentUsers = users.filter((u) => !chatUserIds.has(u.id)).length;
+
+      // 自带模型配置率
+      const aiConfiguredUsers = profiles.filter((p) => p.ai_api_key_cipher && p.ai_chat_model).length;
+
+      // 收藏 Top10
+      const favCount = {};
+      for (const f of favRows) favCount[f.code] = (favCount[f.code] || 0) + 1;
+      const nameMap = {};
+      try {
+        const snap = await getFundsSnapshot();
+        for (const f of snap) nameMap[f.code] = f.name;
+      } catch {}
+      const topFavorites = Object.entries(favCount)
+        .map(([code, count]) => ({ code, count, name: nameMap[code] || code }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 10);
+
+      latencies.sort((a, b) => a - b);
+      const pct = (p) => (latencies.length ? latencies[Math.min(latencies.length - 1, Math.floor(latencies.length * p))] : null);
+
       json(res, 200, {
-        totalUsers: usersRes.data?.users?.length || 0,
-        unusedInvites: invites.filter(i => i.status === "unused").length,
-        usedInvites: invites.filter(i => i.status === "used").length,
-        totalChats: chatsRes.count || 0,
+        // 兼容旧字段
+        totalUsers: users.length,
+        totalChats: chatCountRes.count || 0,
+        unusedInvites: invites.filter((i) => i.status === "unused").length,
+        usedInvites: invites.filter((i) => i.status === "used").length,
+        // 新增
+        newUsers7d,
+        activeUsers7d: active7d.size,
+        silentUsers,
+        aiConfiguredUsers,
+        aiConfiguredRate: users.length ? +((aiConfiguredUsers / users.length) * 100).toFixed(1) : 0,
+        days,
+        registerTrend: days.map((d) => regMap[d]),
+        chatTrend: days.map((d) => chatMap[d]),
+        activeTrend: days.map((d) => activeByDay[d].size),
+        intentDist: Object.entries(intentCount)
+          .map(([intent, count]) => ({ intent, count }))
+          .sort((a, b) => b.count - a.count),
+        health: {
+          sampleSize: loaded,
+          okRate: loaded ? +((okCount / loaded) * 100).toFixed(1) : 100,
+          degradedRate: loaded ? +((degradedCount / loaded) * 100).toFixed(1) : 0,
+          errorCount,
+          latencyP50: pct(0.5),
+          latencyP95: pct(0.95),
+          filterTotal,
+          filterZeroCard,
+          zeroCardFilterRate: filterTotal ? +((filterZeroCard / filterTotal) * 100).toFixed(1) : 0,
+        },
+        topFavorites,
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/admin/behavior" && req.method === "GET") {
+      if (!checkAdminToken(req)) { json(res, 401, { error: "未授权" }); return; }
+      const DAY = 86400000;
+      const now = Date.now();
+      const sinceIso = new Date(now - 14 * DAY).toISOString();
+      const [events, chatRes] = await Promise.all([
+        getEventsSince(sinceIso),
+        supabaseAdmin.from("chat_logs").select("user_id, created_at").gte("created_at", sinceIso).limit(20000),
+      ]);
+      const chatRows = chatRes.data || [];
+
+      const dayKey = (d) => {
+        const dt = new Date(d);
+        return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+      };
+      const days = [];
+      for (let i = 13; i >= 0; i--) days.push(dayKey(now - i * DAY));
+      const emptyDayMap = () => Object.fromEntries(days.map((d) => [d, 0]));
+
+      const typeTotals = { page_view: 0, fund_open: 0, search: 0, filter: 0 };
+      const visitorsByDay = Object.fromEntries(days.map((d) => [d, new Set()]));
+      const openByDay = emptyDayMap();
+      const searchByDay = emptyDayMap();
+      const fundOpenCount = {};
+      const searchCount = {};
+      const visitorsSet = new Set();
+      const openedSet = new Set();
+      const anonUser = new Map();   // anon_id -> user_id（登录过才有）
+      const firstSeen = new Map();  // anon_id -> 最早出现日
+      const daysSeen = new Map();   // anon_id -> Set(日期)
+
+      for (const e of events) {
+        const k = dayKey(e.created_at);
+        if (e.type in typeTotals) typeTotals[e.type] += 1;
+        if (e.anon_id) {
+          visitorsSet.add(e.anon_id);
+          if (visitorsByDay[k]) visitorsByDay[k].add(e.anon_id);
+          if (e.user_id && !anonUser.has(e.anon_id)) anonUser.set(e.anon_id, e.user_id);
+          if (!daysSeen.has(e.anon_id)) daysSeen.set(e.anon_id, new Set());
+          daysSeen.get(e.anon_id).add(k);
+          const fs = firstSeen.get(e.anon_id);
+          if (!fs || k < fs) firstSeen.set(e.anon_id, k);
+        }
+        if (e.type === "fund_open") {
+          if (k in openByDay) openByDay[k] += 1;
+          if (e.anon_id) openedSet.add(e.anon_id);
+          if (e.code) fundOpenCount[e.code] = (fundOpenCount[e.code] || 0) + 1;
+        }
+        if (e.type === "search") {
+          if (k in searchByDay) searchByDay[k] += 1;
+          const q = e.payload?.q;
+          if (q) searchCount[q] = (searchCount[q] || 0) + 1;
+        }
+      }
+
+      const nameMap = {};
+      try { const snap = await getFundsSnapshot(); for (const f of snap) nameMap[f.code] = f.name; } catch {}
+      const topViewedFunds = Object.entries(fundOpenCount)
+        .map(([code, count]) => ({ code, count, name: nameMap[code] || code }))
+        .sort((a, b) => b.count - a.count).slice(0, 10);
+      const topSearches = Object.entries(searchCount)
+        .map(([q, count]) => ({ q, count }))
+        .sort((a, b) => b.count - a.count).slice(0, 10);
+
+      // 转化漏斗：访问网站 → 打开基金详情 → 用了 AI 投顾（AI 需登录，用 user_id 关联）
+      const chattedUsers = new Set(chatRows.map((c) => c.user_id).filter(Boolean));
+      let aiVisitors = 0;
+      for (const anon of visitorsSet) {
+        const uid = anonUser.get(anon);
+        if (uid && chattedUsers.has(uid)) aiVisitors += 1;
+      }
+
+      // 次日回访留存（匿名访客口径）：首见日不是今天的访客里，有没有在更晚的某天再来
+      let cohort = 0, returned = 0;
+      const todayKey = dayKey(now);
+      for (const [anon, fs] of firstSeen) {
+        if (fs === todayKey) continue;
+        cohort += 1;
+        const ds = daysSeen.get(anon);
+        let came = false;
+        for (const d of ds) { if (d > fs) { came = true; break; } }
+        if (came) returned += 1;
+      }
+
+      json(res, 200, {
+        days,
+        typeTotals,
+        visitorTrend: days.map((d) => visitorsByDay[d].size),
+        openTrend: days.map((d) => openByDay[d]),
+        searchTrend: days.map((d) => searchByDay[d]),
+        topViewedFunds,
+        topSearches,
+        funnel: { visitors: visitorsSet.size, openedFund: openedSet.size, askedAI: aiVisitors },
+        retention: { cohort, returned, rate: cohort ? +((returned / cohort) * 100).toFixed(1) : 0 },
       });
       return;
     }
@@ -1118,6 +1336,7 @@ const server = createServer(async (req, res) => {
       if (!checkAdminToken(req)) { json(res, 401, { error: "未授权" }); return; }
       const page = Math.max(0, parseInt(url.searchParams.get("page") || "0", 10));
       const userId = url.searchParams.get("userId") || null;
+      const issuesOnly = url.searchParams.get("issues") === "1";
       const limit = 30;
       let query = supabaseAdmin
         .from("chat_logs")
@@ -1125,6 +1344,7 @@ const server = createServer(async (req, res) => {
         .order("created_at", { ascending: false })
         .range(page * limit, page * limit + limit - 1);
       if (userId) query = query.eq("user_id", userId);
+      if (issuesOnly) query = query.or("ok.eq.false,degraded.eq.true");
       const { data, error } = await query;
       if (error) { json(res, 500, { error: error.message }); return; }
       // 批量取用户邮箱

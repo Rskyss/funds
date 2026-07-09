@@ -10,3 +10,6 @@ outputs/
 fund/
 lib/stock analysis/
 yt-scribe-clone/
+
+# 含密钥的 .env 备份，禁止提交
+.env.bak.*

@@ -4,12 +4,12 @@ import { signIn, signUp } from "./auth.js";
 export default function AuthModal({ open, mode, onClose, onSwitch, onSuccess }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [invite, setInvite] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (open) { setError(""); setBusy(false); }
+    if (open) { setError(""); setBusy(false); setConfirmPassword(""); }
   }, [open, mode]);
 
   useEffect(() => {
@@ -25,12 +25,16 @@ export default function AuthModal({ open, mode, onClose, onSwitch, onSuccess }) 
   async function submit(e) {
     e.preventDefault();
     setError("");
+    if (!isLogin && password !== confirmPassword) {
+      setError("两次输入的密码不一致，请重新确认");
+      return;
+    }
     setBusy(true);
     try {
       if (isLogin) {
         await signIn(email.trim(), password);
       } else {
-        await signUp(email.trim(), password, invite.trim());
+        await signUp(email.trim(), password);
       }
       onSuccess?.();
     } catch (err) {
@@ -51,7 +55,7 @@ export default function AuthModal({ open, mode, onClose, onSwitch, onSuccess }) 
         <p className="auth-modal__hint">
           {isLogin
             ? "登录后即可使用 AI 投顾、收藏和基金对比。"
-            : "注册需要邀请码，邮箱不会发送验证邮件。"}
+            : "填写邮箱和密码即可注册，邮箱不会发送验证邮件。"}
         </p>
         <form className="auth-modal__form" onSubmit={submit}>
           <label className="auth-modal__field">
@@ -73,11 +77,12 @@ export default function AuthModal({ open, mode, onClose, onSwitch, onSuccess }) 
           </label>
           {!isLogin && (
             <label className="auth-modal__field">
-              <span>邀请码</span>
+              <span>确认密码</span>
               <input
-                type="text" autoComplete="off" required
-                value={invite} onChange={(e) => setInvite(e.target.value)}
-                placeholder="请输入邀请码"
+                type="password" autoComplete="new-password"
+                minLength={6} required
+                value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="再次输入密码"
               />
             </label>
           )}

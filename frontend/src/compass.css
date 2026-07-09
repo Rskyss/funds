@@ -2720,3 +2720,95 @@ input, select { font: inherit; color: inherit; }
   background: #FAFBFF; border-radius: 8px; padding: 10px 12px;
   border: 1px solid #EEF2FF;
 }
+
+/* ===== Admin — 概览仪表盘 ===== */
+.adm-dash { display: flex; flex-direction: column; gap: 18px; }
+
+.adm-kpi-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
+.adm-stat-card__sub { font-size: 0.72rem; color: var(--muted-2); margin-top: 6px; }
+
+.adm-panel {
+  background: #fff; border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px;
+}
+.adm-panel__title { font-size: 0.9rem; font-weight: 700; color: var(--ink); margin: 0 0 16px; }
+
+.adm-trend-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+.adm-trend__head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
+.adm-trend__title { font-size: 0.8rem; color: var(--ink-2); font-weight: 600; }
+.adm-trend__total { font-size: 0.74rem; color: var(--muted); }
+.adm-bars { display: flex; align-items: flex-end; gap: 2px; height: 46px; }
+.adm-bars__col { flex: 1; display: flex; align-items: flex-end; height: 100%; }
+.adm-bars__bar { width: 100%; border-radius: 2px 2px 0 0; min-height: 2px; }
+
+.adm-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+@media (max-width: 860px) {
+  .adm-kpi-grid { grid-template-columns: repeat(2, 1fr); }
+  .adm-trend-grid { grid-template-columns: 1fr; }
+  .adm-two-col { grid-template-columns: 1fr; }
+}
+
+/* 意图分布横向条 */
+.adm-barlist { display: flex; flex-direction: column; gap: 11px; }
+.adm-barlist__row { display: flex; align-items: center; gap: 10px; }
+.adm-barlist__label { width: 76px; flex-shrink: 0; font-size: 0.8rem; color: var(--ink-2); }
+.adm-barlist__track { flex: 1; height: 9px; background: #EEF2FB; border-radius: 999px; overflow: hidden; }
+.adm-barlist__fill { height: 100%; background: var(--accent); border-radius: 999px; min-width: 2px; }
+.adm-barlist__val { flex-shrink: 0; width: 78px; text-align: right; font-size: 0.76rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* 收藏 Top 榜 */
+.adm-toplist { display: flex; flex-direction: column; }
+.adm-toplist__row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid #F2F5FC; }
+.adm-toplist__row:last-child { border-bottom: none; }
+.adm-toplist__rank {
+  flex-shrink: 0; width: 20px; height: 20px; border-radius: 6px; background: var(--accent-soft);
+  color: var(--accent); font-size: 0.72rem; font-weight: 700; display: flex; align-items: center; justify-content: center;
+}
+.adm-toplist__name { flex: 1; min-width: 0; font-size: 0.82rem; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.adm-toplist__code { flex-shrink: 0; font-size: 0.74rem; color: var(--muted); }
+.adm-toplist__count {
+  flex-shrink: 0; font-size: 0.76rem; font-weight: 600; color: var(--accent);
+  background: #F0F3FA; border-radius: 999px; padding: 1px 9px; font-variant-numeric: tabular-nums;
+}
+
+/* 健康度小格 */
+.adm-health-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+@media (max-width: 860px) { .adm-health-grid { grid-template-columns: repeat(2, 1fr); } }
+.adm-health-tile { border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; background: #FAFBFF; }
+.adm-health-tile__val { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ink); }
+.adm-health-tile__label { font-size: 0.76rem; color: var(--ink-2); margin-top: 4px; }
+.adm-health-tile__hint { font-size: 0.68rem; color: var(--muted-2); margin-top: 3px; }
+.adm-health-tile--good { background: #F0FDF4; border-color: #BBF7D0; }
+.adm-health-tile--good .adm-health-tile__val { color: #16a34a; }
+.adm-health-tile--bad { background: #FEF2F2; border-color: #FECACA; }
+.adm-health-tile--bad .adm-health-tile__val { color: #E5484D; }
+.adm-health-tile--warn { background: #FFFBEB; border-color: #FDE68A; }
+.adm-health-tile--warn .adm-health-tile__val { color: #D97706; }
+
+/* ===== Admin — 对话记录：异常/降级筛选 ===== */
+.adm-user-list--dim { opacity: 0.45; pointer-events: none; }
+.adm-badge--warn { background: #FFFBEB; color: #D97706; }
+.adm-convo-card__user {
+  margin-left: auto; font-size: 0.74rem; color: var(--muted);
+  background: #F0F3FA; border-radius: 999px; padding: 1px 9px;
+}
+.adm-btn--ghost-light {
+  background: #fff; color: var(--ink-2); border: 1px solid var(--border);
+}
+.adm-btn--ghost-light:hover { background: #F4F7FF; border-color: var(--accent-edge); }
+
+/* ===== Admin — 行为：漏斗 / 留存 ===== */
+.adm-funnel { display: flex; flex-direction: column; gap: 12px; }
+.adm-funnel__row { display: flex; align-items: center; gap: 10px; }
+.adm-funnel__label { width: 92px; flex-shrink: 0; font-size: 0.8rem; color: var(--ink-2); }
+.adm-funnel__track { flex: 1; background: #EEF2FB; border-radius: 8px; overflow: hidden; }
+.adm-funnel__fill {
+  height: 30px; border-radius: 8px; min-width: 30px;
+  display: flex; align-items: center; justify-content: flex-end; padding-right: 10px;
+}
+.adm-funnel__num { color: #fff; font-size: 0.82rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.adm-funnel__conv { flex-shrink: 0; width: 56px; text-align: right; font-size: 0.76rem; color: var(--muted); }
+.adm-note { font-size: 0.72rem; color: var(--muted-2); margin: 12px 0 0; }
+
+.adm-retention { display: flex; align-items: baseline; gap: 14px; padding: 8px 0; }
+.adm-retention__big { font-size: 2.4rem; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; }
+.adm-retention__hint { font-size: 0.82rem; color: var(--ink-2); line-height: 1.6; }
