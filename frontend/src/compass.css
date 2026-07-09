@@ -870,6 +870,14 @@ input, select { font: inherit; color: inherit; }
 
 /* card tags */
 .fcard__tags { display: flex; flex-wrap: wrap; gap: 5px; }
+.fcard__alts {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .tag {
   height: 20px;
   padding: 0 7px;

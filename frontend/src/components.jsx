@@ -354,6 +354,12 @@ const FundCard = React.memo(function FundCard({ fund, idx, isFav, onFav, onOpen,
         <span className={`fcard__status ${statusInfo.cls}`}>{statusInfo.text}</span>
       </div>
 
+      {Array.isArray(fund.altShares) && fund.altShares.length > 0 && (
+        <div className="fcard__alts" title={fund.altShares.map((a) => `${a.shareLabel} ${a.code}`).join("、")}>
+          另有{fund.altShares.map((a) => ` ${a.shareLabel}(${a.code})`).join(" /")}
+        </div>
+      )}
+
       <div className="fcard__numbers">
         <div className="fcard__primary">
           <span className="fcard__primary-label">近 1 年</span>

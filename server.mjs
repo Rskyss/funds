@@ -65,6 +65,7 @@ import { logChatTurn, rateLimit } from "./lib/agent/metrics.mjs";
 import { suggestionTemplates } from "./lib/agent/rules.mjs";
 import { getActiveHotSuggestions, maybeRefreshHotSuggestions } from "./lib/agent/hotTopics.mjs";
 import { formatDataUpdateDisplay, scheduledUpdateBefore } from "./lib/dataSchedule.mjs";
+import { mergeShareClassCards } from "./lib/agent/shareClass.mjs";
 
 // 读取登录用户的聊天凭证（apiKey + 投问模型）；未配置/解密失败返回 null。
 async function loadChatCreds(userId) {
@@ -297,33 +298,38 @@ async function getFundsSnapshot() {
 }
 
 async function loadOrRefresh(refresh) {
+  // 列表响应折叠同基金多份额（主份额出卡、其余进 altShares）；
+  // 内存快照 rememberFundsSnapshot 保留全量，详情同类对比与聊天 Agent 不受影响
   if (refresh) {
     const snapshot = await refreshFunds();
     const withAi = await attachAiSummaries(snapshot.funds);
     rememberFundsSnapshot(withAi);
+    const merged = mergeShareClassCards(withAi);
     const lastUpdated = await getLastUpdatedAt();
     const { fetchedAt, fetchedAtText } = formatDataUpdateDisplay(lastUpdated);
-    return { ...snapshot, funds: withAi, fetchedAt, fetchedAtText };
+    return { ...snapshot, funds: merged, total: merged.length, fetchedAt, fetchedAtText };
   }
   const funds = await getAllFunds();
   if (funds.length) {
     applyPercentileScores(funds);
     const [withAi, lastUpdated] = await Promise.all([attachAiSummaries(funds), getLastUpdatedAt()]);
     rememberFundsSnapshot(withAi);
+    const merged = mergeShareClassCards(withAi);
     const { fetchedAt, fetchedAtText } = formatDataUpdateDisplay(lastUpdated);
     return {
       fetchedAt,
       fetchedAtText,
-      total: withAi.length,
-      funds: withAi,
+      total: merged.length,
+      funds: merged,
     };
   }
   const snapshot = await refreshFunds();
   const withAi = await attachAiSummaries(snapshot.funds);
   rememberFundsSnapshot(withAi);
+  const merged = mergeShareClassCards(withAi);
   const lastUpdated = await getLastUpdatedAt();
   const { fetchedAt, fetchedAtText } = formatDataUpdateDisplay(lastUpdated);
-  return { ...snapshot, funds: withAi, fetchedAt, fetchedAtText };
+  return { ...snapshot, funds: merged, total: merged.length, fetchedAt, fetchedAtText };
 }
 
 async function loadFundDetailWithHistory(code, allFundsCache) {
