@@ -1446,6 +1446,8 @@ function normalizeCard(c) {
     return1y: c.return1y ?? 0,
     returnYtd: c.returnYtd ?? 0,
     score: c.score ?? "--",
+    peerRank: c.peerRank ?? null,
+    peerCount: c.peerCount ?? null,
   };
 }
 
@@ -2009,8 +2011,8 @@ function EmbedFundCard({ f, onOpen, isOpen }) {
           <strong className={`mono ${f.returnYtd >= 0 ? "up" : "down"}`}>{f.returnYtd >= 0 ? "+" : ""}{Number(f.returnYtd).toFixed(2)}%</strong>
         </div>
         <div className="ai-fcard__cell">
-          <span>观察分</span>
-          <strong className="mono">{f.score}</strong>
+          <span>{f.peerRank && f.peerCount ? "同类排名" : "观察分"}</span>
+          <strong className="mono">{f.peerRank && f.peerCount ? `${f.peerRank}/${f.peerCount}` : f.score}</strong>
         </div>
       </div>
     </div>

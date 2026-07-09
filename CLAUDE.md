@@ -119,7 +119,7 @@ Supabase Postgres + Auth
 ### 关键模块约束
 
 - `lib/eastmoney.mjs` 解析东方财富私有格式：基金排行接口（完整收益数据）+ 基金代码库（兜底，让没上排行的 QDII 也出现）。排行接口用 `vm.runInNewContext` 解 `var rankData = {...}`；要换数据源先看 `parseRankData` 和 `fetchQdiiUniverse`。
-- `classifyFund(name)` 是纯字符串关键词规则，给基金打 `region/theme/fundType/role/risk` 五标签。`scoreFund(fund)` 是手工权重启发式。两者改了之后要重刷数据才会重算落库。
+- `classifyFund(name)` 是纯字符串关键词规则，给基金打 `region/theme/fundType/role/risk` 五标签，改了要重刷数据才会重算落库。评分为**同主题内**百分位（`applyPercentileScores` 按 `theme` 分组，附 `peerRank`/`peerCount`；不足 6 只标"同类样本少"），服务读库时实时重算，改公式重启即生效、无需重刷数据；纯函数单测在 `tests/score.test.mjs`（`node --test tests/`）。
 - `buildStructuredAnalysis` 输出结构化分析对象给详情抽屉用，**不走 AI**；AI 点评（一句话）由 `lib/ai.mjs` 生成、单独存 `fund_ai_summary` 表。
 - `loadOrRefresh` 是兜底加载：DB 没数据时自动抓一次；用户主动刷新需要 `?refresh=1`。
 - `lib/dataSchedule.mjs` 在服务启动时自检：数据早于最近 `DATA_UPDATE_TIME` 批次会后台补刷。
