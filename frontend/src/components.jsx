@@ -459,6 +459,8 @@ function adaptDetail(api, fund) {
     },
     aiSummary: api.aiSummary || "暂无 AI 点评。",
     aiDetail: api.aiDetail || null,
+    aiSummaryAt: api.aiSummaryAt || null,
+    aiDetailAt: api.aiDetailAt || null,
     peer: {
       themeSamples: peer.themeCount ?? 0,
       themeRank1y: peer.themeRank1y ?? 0,
@@ -538,6 +540,8 @@ function buildPreviewDetail(fund) {
     },
     aiSummary: "正在加载 AI 点评…",
     aiDetail: null,
+    aiSummaryAt: null,
+    aiDetailAt: null,
     peer: { themeSamples: 0, themeRank1y: 0, regionRankScore: 0, benchmark: "—", themeRankNum: null, themeMedian1y: null },
     suitability: [],
     riskNotes: [],
@@ -847,6 +851,10 @@ function FundDrawer({ fund, onClose, isFav, onFav, chatOpen, onOpenFund, onOpenC
                 <div className="ai-summary">
                   <div className="ai-summary__head">
                     <span className="ai-summary__tag">AI 点评</span>
+                    {(() => {
+                      const at = d.aiDetailAt || d.aiSummaryAt;
+                      return at ? <span className="ai-summary__date mono">生成于 {String(at).slice(0, 10)}</span> : null;
+                    })()}
                     {isLong && (
                       <button
                         type="button"
