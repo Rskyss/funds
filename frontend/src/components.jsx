@@ -269,14 +269,21 @@ function ListControls({ sort, sortDir, onSortChange }) {
 }
 
 function QuickChips({ active, setActive }) {
+  const toggle = (id) => {
+    setActive((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
   return (
     <div className="chips-row">
       <span className="chips-row__label">热门筛选</span>
       {QUICK_CHIPS.map((c) => (
         <button
           key={c.id}
-          className={`qchip ${active === c.id ? "is-on" : ""}`}
-          onClick={() => setActive(active === c.id ? null : c.id)}
+          className={`qchip ${active.has(c.id) ? "is-on" : ""}`}
+          onClick={() => toggle(c.id)}
         >
           <span className="qchip__dot"/>{c.label}
         </button>

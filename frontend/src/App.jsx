@@ -78,7 +78,7 @@ function App() {
   const [q, setQ] = useState("");
   const [sort, setSort] = useState("return1y");
   const [sortDir, setSortDir] = useState("desc");
-  const [activeChip, setActiveChip] = useState(null);
+  const [activeChips, setActiveChips] = useState(() => new Set());
   const [themeSel, setThemeSel] = useState(null);
   const [favs, setFavs] = useState(new Set());
   const [favOnly, setFavOnly] = useState(false);
@@ -153,10 +153,10 @@ function App() {
   useEffect(() => { if (openFund?.code) track("fund_open", { code: openFund.code }); }, [openFund?.code]);
   useEffect(() => { trackSearch(q); }, [q]);
   useEffect(() => {
-    if (!activeChip) return;
-    const chip = QUICK_CHIPS.find((c) => c.id === activeChip);
-    track("filter", { label: chip?.label || activeChip });
-  }, [activeChip]);
+    if (!activeChips.size) return;
+    const labels = QUICK_CHIPS.filter((c) => activeChips.has(c.id)).map((c) => c.label);
+    track("filter", { label: labels.join("+") });
+  }, [activeChips]);
   useEffect(() => { if (themeSel) track("filter", { label: themeSel }); }, [themeSel]);
 
   // apply accent
@@ -229,16 +229,20 @@ function App() {
       `${f.code} ${f.name} ${f.theme} ${f.region} ${f.manager}`.toLowerCase().includes(k)
     );
   }
-  if (activeChip) {
-    const chip = QUICK_CHIPS.find((c) => c.id === activeChip);
-    if (chip) {
-      if (chip.region) funds = funds.filter((f) => f.region === chip.region);
-      if (chip.theme) funds = funds.filter((f) => f.theme === chip.theme);
-      if (chip.role) funds = funds.filter((f) => f.role === chip.role);
-      if (chip.rating) funds = funds.filter((f) => f.rating === chip.rating);
-      if (chip.status) funds = funds.filter((f) => f.status === chip.status);
-      if (chip.keyword) funds = funds.filter((f) => f.name.includes(chip.keyword));
-    }
+  if (activeChips.size) {
+    const chips = QUICK_CHIPS.filter((c) => activeChips.has(c.id));
+    const matchChip = (chip, f) =>
+      (chip.region  ? f.region === chip.region   : true) &&
+      (chip.theme   ? f.theme === chip.theme     : true) &&
+      (chip.role    ? f.role === chip.role       : true) &&
+      (chip.rating  ? f.rating === chip.rating   : true) &&
+      (chip.status  ? f.status === chip.status   : true) &&
+      (chip.keyword ? f.name.includes(chip.keyword) : true);
+    // 主题类标签之间取并集，条件类标签逐个取交集
+    const unionChips = chips.filter((c) => c.kind === "union");
+    const andChips = chips.filter((c) => c.kind === "and");
+    if (unionChips.length) funds = funds.filter((f) => unionChips.some((c) => matchChip(c, f)));
+    for (const c of andChips) funds = funds.filter((f) => matchChip(c, f));
   }
   if (themeSel) funds = funds.filter((f) => f.theme === themeSel);
   if (favOnly) funds = funds.filter((f) => favs.has(f.code));
@@ -265,7 +269,7 @@ function App() {
 
         <div className="filter-row">
           <Toolbar q={q} setQ={setQ} />
-          <QuickChips active={activeChip} setActive={setActiveChip}/>
+          <QuickChips active={activeChips} setActive={setActiveChips}/>
         </div>
 
         <div className="results-head">
