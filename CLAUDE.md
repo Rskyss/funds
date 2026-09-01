@@ -159,6 +159,6 @@ Supabase Postgres + Auth
 - 改 Agent 行为优先改 `rules/*.md`（**改后需重启服务**，卡片在进程内永久缓存），其次才动 `lib/agent/`
 - 历任开发文档在 `docs/qdii-supabase接入/`，含 ALIGNMENT/CONSENSUS/DESIGN/TASK/ACCEPTANCE/FINAL/TODO（6A 工作流产物）；前端重设计在 `docs/前端重设计/`；Agent 架构在 `docs/ai-agent/`；1.7.1 安全加固在 `docs/安全加固_1.7.1/`；总台账在 `docs/开发进度跟踪.md`（每个任务完成必须登记）
 - 部署到生产走 rsync（服务器目录不是 git 仓库），见 `AGENTS.md`「生产服务器」
-- 推送规则：一个版本＝远端恰好一个提交，标题 `vX.Y 一句话主题`，正文分「新增功能 / 优化功能 / 修复bug」；`.githooks/pre-push` 拦截不合规标题（`git config core.hooksPath .githooks` 启用）；不发版就不推 main；推送/tag/部署先经用户指示
+- 推送规则：一个版本＝远端恰好一个提交，标题 `vX.Y 一句话主题`，正文**先列「解决问题：1.～n」**（每条一句"之前 → 现在"），再分「新增功能 / 优化功能 / 修复bug」；`.githooks/pre-push` 拦截不合规标题（`git config core.hooksPath .githooks` 启用）；不发版就不推 main；推送/tag/部署先经用户指示
 - `outputs/` 是脚本产物，已 Git 忽略
 - `.env` 已在 `.gitignore`，发版前确认仓库只有 `.env.example`

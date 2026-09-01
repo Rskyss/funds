@@ -42,5 +42,7 @@ test("批量回退给出统计口径", () => {
   assert.equal(funds[2].aumBillion, null);
   assert.equal(restoredFields, 1);
   assert.equal(restoredFunds, 1);
+  const withField = fillMissingForAll([{ code: "a", aumBillion: null, sharpe1y: null }], new Map([["a", { aumBillion: 1, sharpe1y: 2 }]]));
+  assert.deepEqual(withField.restoredByField, { aumBillion: 1, sharpe1y: 1 });
   assert.ok(STICKY_METRIC_FIELDS.includes("sharpe1y"));
 });

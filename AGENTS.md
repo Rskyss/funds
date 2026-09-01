@@ -36,7 +36,7 @@ ES modules（`.mjs`，`type: module`）、两空格缩进、分号；JS 用 `cam
 
 ## 提交与发版
 
-本地开发期可以小步提交；**推向 `main` 前必须 squash 成恰好一个提交**，标题 `vX.Y 一句话主题`（修订版写 `vX.Y.Z`），正文按「新增功能 / 优化功能 / 修复bug」分组、用产品语言，并打同名 tag + GitHub Release。`main` 上不允许 `docs:` / `fix:` 之类的零碎提交；`.githooks/pre-push` 会机械拦截不合规标题（clone 后执行一次 `git config core.hooksPath .githooks` 启用）。推送、打 tag、部署都是对外动作，先经用户明确指示。
+本地开发期可以小步提交；**推向 `main` 前必须 squash 成恰好一个提交**，标题 `vX.Y 一句话主题`（修订版写 `vX.Y.Z`）；正文**第一段固定是「解决问题：」编号清单 1～n**（每条一句话：用户之前遇到什么 → 这版之后怎样），之后再按「新增功能 / 优化功能 / 修复bug」分组、用产品语言；打同名 tag + GitHub Release（Release 说明同样以「解决问题」开头）。`main` 上不允许 `docs:` / `fix:` 之类的零碎提交；`.githooks/pre-push` 会机械拦截不合规标题（clone 后执行一次 `git config core.hooksPath .githooks` 启用）。推送、打 tag、部署都是对外动作，先经用户明确指示。
 
 ## 生产服务器
 

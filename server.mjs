@@ -259,9 +259,12 @@ async function refreshFunds() {
   if (prevByCode.size) {
     const merged = fillMissingForAll(snapshot.funds, prevByCode);
     snapshot.funds = merged.funds;
-    if (merged.restoredFunds) {
-      console.log(`指标回退：${merged.restoredFunds} 只基金共 ${merged.restoredFields} 个字段本次抓取为空，沿用上次值`);
-    }
+    // maxDrawdown1y 在下一步由净值历史重算，这里的“回退”只是过渡，不计入抓取失败
+    const FIELD_LABEL = { aumBillion: "规模", managerNames: "经理", sharpe1y: "夏普", volatility1y: "波动率", ratingMorningstar: "评级", purchaseStatus: "申购状态", inception: "成立日" };
+    const parts = Object.entries(merged.restoredByField || {})
+      .filter(([k]) => FIELD_LABEL[k])
+      .map(([k, n]) => `${FIELD_LABEL[k]} ${n} 只`);
+    if (parts.length) console.log(`指标回退（本次抓取为空、沿用上次值）：${parts.join("，")}`);
   }
   const missingAum = snapshot.funds.filter((f) => f.aumBillion === null || f.aumBillion === undefined).length;
   const missingSharpe = snapshot.funds.filter((f) => f.sharpe1y === null || f.sharpe1y === undefined).length;
