@@ -234,9 +234,11 @@ const FundCard = React.memo(function FundCard({ fund, idx, isFav, onFav, onOpen,
 
   const riskClass = fund.risk === "高" ? "tag--risk-high" : "tag--risk-mid";
   const statusInfo = ({
-    open:  { cls: "tag--status-open",  text: "可申购" },
-    limit: { cls: "tag--status-limit", text: formatPurchaseLimitLabel(fund.limitYuan) },
-    stop:  { cls: "tag--status-stop",  text: "暂停申购" },
+    open:     { cls: "tag--status-open",  text: "可申购" },
+    limit:    { cls: "tag--status-limit", text: formatPurchaseLimitLabel(fund.limitYuan) },
+    stop:     { cls: "tag--status-stop",  text: "暂停申购" },
+    exchange: { cls: "tag--status-limit", text: "场内交易" },
+    closed:   { cls: "tag--status-stop",  text: "封闭期" },
   })[fund.status] || { cls: "tag--status-open", text: "可申购" };
 
 
@@ -304,7 +306,7 @@ const FundCard = React.memo(function FundCard({ fund, idx, isFav, onFav, onOpen,
                 <span key={i} className={i < fund.rating ? "" : "off"}>★</span>
               ))}
             </span>
-            <span className="rating-stars__meta mono">晨星 · {fund.rating} 星</span>
+            <span className="rating-stars__meta mono">{fund.rating ? `晨星 · ${fund.rating} 星` : "暂无评级"}</span>
           </div>
           <div className="fcard__stats">
             <span>夏普 <strong className="mono">{fund.hasSharpe ? fund.sharpe.toFixed(2) : "暂无"}</strong></span>
@@ -356,7 +358,7 @@ function adaptDetail(api, fund) {
     const other = Math.max(0, +(100 - stock - cash).toFixed(2));
     let trend = "→";
     if (prev) trend = stock > (prev.stock ?? 0) + 0.5 ? "加仓" : stock < (prev.stock ?? 0) - 0.5 ? "减仓" : "→";
-    return { date: r.date, stock, cash, other, netAsset: r.netAssetBillion ?? 0, trend };
+    return { date: r.date, stock, cash, other, netAsset: r.netAssetBillion ?? null, trend };
   });
   const peer = an.peer || {};
   const lastNav = navHist.length ? navHist[navHist.length - 1].nav : (an.realtime?.nav ?? fund.nav ?? 0);
@@ -739,7 +741,7 @@ function FundDrawer({ fund, onClose, isFav, onFav, chatOpen, onOpenFund, onOpenC
               </div>
               <div className="drawer-rating">
                 <span className="rating-stars__icons">{[...Array(5)].map((_, i) => <span key={i} className={i < renderFund.rating ? "" : "off"}>★</span>)}</span>
-                <span className="drawer-rating__meta">晨星 · {renderFund.rating} 星</span>
+                <span className="drawer-rating__meta">{renderFund.rating ? `晨星 · ${renderFund.rating} 星` : "暂无评级"}</span>
               </div>
             </div>
             <div className="nav-chart-slot">
@@ -827,9 +829,11 @@ function FundDrawer({ fund, onClose, isFav, onFav, chatOpen, onOpenFund, onOpenC
             <div className="trade-strip">
               <div className="trade-strip__cell">
                 <span>申购状态</span>
-                <strong className={d.trading.purchaseStatus === "open" ? "" : d.trading.purchaseStatus === "limit" ? "warn" : "stop"}>
+                <strong className={d.trading.purchaseStatus === "open" ? "" : ["limit", "exchange"].includes(d.trading.purchaseStatus) ? "warn" : "stop"}>
                   {d.trading.purchaseStatus === "open" ? "开放申购"
                     : d.trading.purchaseStatus === "limit" ? formatPurchaseLimitLabel(d.trading.purchaseLimit)
+                    : d.trading.purchaseStatus === "exchange" ? "场内交易（券商账户买卖）"
+                    : d.trading.purchaseStatus === "closed" ? "封闭期"
                     : "暂停申购"}
                 </strong>
               </div>
@@ -1092,7 +1096,7 @@ function allocTableRows(rows) {
         <td className="mono num">{r.other.toFixed(2)}%</td>
         <td className="mono num">{r.stock.toFixed(2)}%</td>
         <td className="mono num">{r.cash.toFixed(2)}%</td>
-        <td className="mono num">{r.netAsset.toFixed(2)} 亿</td>
+        <td className={`mono num ${r.netAsset == null ? "na" : ""}`}>{r.netAsset == null ? "暂无" : `${r.netAsset.toFixed(2)} 亿`}</td>
         <td><span className={`trend-pill ${r.trend === "加仓" ? "up" : r.trend === "减仓" ? "down" : "flat"}`}>{r.trend === "→" ? "稳定" : r.trend}</span></td>
       </tr>
     ));
@@ -1381,12 +1385,14 @@ function formatPurchaseLimitLabel(yuan) {
 function normalizeCard(c) {
   const status =
     c.purchaseStatus === "限购" ? "limit" :
-    c.purchaseStatus === "暂停" ? "stop" : "open";
+    c.purchaseStatus === "暂停" ? "stop" :
+    c.purchaseStatus === "场内交易" ? "exchange" :
+    c.purchaseStatus === "封闭" ? "closed" : "open";
   return {
     code: c.code,
     name: c.name,
     status,
-    limitText: status === "limit" ? formatPurchaseLimitLabel(c.purchaseLimitYuan) : status === "stop" ? "暂停申购" : "可申购",
+    limitText: status === "limit" ? formatPurchaseLimitLabel(c.purchaseLimitYuan) : status === "stop" ? "暂停申购" : status === "exchange" ? "场内交易" : status === "closed" ? "封闭期" : "可申购",
     tags: [c.region, c.theme, c.role].filter(Boolean),
     return3m: c.return3m ?? 0,
     return1y: c.return1y ?? 0,
@@ -1951,7 +1957,7 @@ function AIBubble({ msg, onOpenFund, openFundCode }) {
 }
 
 function EmbedFundCard({ f, onOpen, isOpen }) {
-  const statusCls = f.status === "open" ? "tag--status-open" : f.status === "limit" ? "tag--status-limit" : "tag--status-stop";
+  const statusCls = f.status === "open" ? "tag--status-open" : ["limit", "exchange"].includes(f.status) ? "tag--status-limit" : "tag--status-stop";
   return (
     <div className={`ai-fcard${isOpen ? " ai-fcard--active" : ""}`} onClick={onOpen}>
       <div className="ai-fcard__head">
@@ -1979,7 +1985,7 @@ function EmbedFundCard({ f, onOpen, isOpen }) {
         </div>
         <div className="ai-fcard__cell">
           <span>{f.peerRank && f.peerCount ? "同类排名" : "观察分"}</span>
-          <strong className="mono">{f.peerRank && f.peerCount ? `${f.peerRank}/${f.peerCount}` : f.score}</strong>
+          <strong className="mono">{f.peerRank && f.peerCount ? `${f.peerRank}/${f.peerCount}` : (f.score ?? "—")}</strong>
         </div>
       </div>
     </div>

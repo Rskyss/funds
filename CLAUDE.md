@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概览
 
-QDII 基金罗盘：本地运行的 QDII 基金查询/筛选/对比/AI 点评/聊天 Agent 的 Web 应用。当前版本 **1.7.1**（1.6 引入 BYOK 用户自带百炼 Key；1.7 筛选多选/同类内评分；1.7.1 安全加固与工程补全）：
+QDII 基金罗盘：本地运行的 QDII 基金查询/筛选/对比/AI 点评/聊天 Agent 的 Web 应用。当前版本 **1.7.3**（1.6 引入 BYOK 用户自带百炼 Key；1.7 筛选多选/同类内评分；1.7.1 安全加固与工程补全；1.7.3 线上体检修复：东财接口连通、无数据不评分、持仓 30 天缓存、数据库瞬时错误重试、数据完整性告警）：
 
 - 前端：Vite + React 18，源码在 `frontend/`，`npm run build` 产出到 `public/`
 - 后端：Node 原生 HTTP 服务（`server.mjs`），无框架
@@ -69,6 +69,7 @@ npm run auth:reset-password              # 重置某用户密码（reset-user-pa
 - `DASHSCOPE_ENABLE_THINKING` / `DASHSCOPE_THINKING_BUDGET` — Qwen 思考模式开关与预算
 - `DATA_REFRESH_TOKEN` — 全量刷新授权：`GET /api/funds?refresh=1` 需带 `x-refresh-token`（或后台管理员登录态）；未配置时只接受本机直连（127.0.0.1 且未经反代）；`DATA_REFRESH_COOLDOWN_MS` 两次刷新最短间隔（默认 10 分钟）
 - `AGENT_RATE_LIMIT` / `FETCH_TIMEOUT_MS` / `DASHSCOPE_TIMEOUT_MS` / `DASHSCOPE_STREAM_TIMEOUT_MS` — 聊天限流与出站超时，有默认值
+- `NET_AUTOSELECT_ATTEMPT_TIMEOUT_MS`（默认 1500）— Node 多 IP "快速切换"每个地址的等待；生产服务器到东财 `fundmobapi` 往返 400ms+，用 Node 默认 250ms 会永远连不上（1.7.3 修复）。`HOLDINGS_TTL_DAYS`（默认 30）— 详情页持仓/资产配置缓存有效期
 - `TAVILY_API_KEY` — 留空则事件类问题降级
 - `DATA_UPDATE_TIME` — 首页「更新时间」展示对齐的定时批次（默认 `07:00` Asia/Shanghai）
 - `ADMIN_PASSWORD` — 后台管理（`/api/admin/*` + 前端 `Admin.jsx`）登录口令；未配置则后台接口返回 503
@@ -98,6 +99,8 @@ Node http server (server.mjs)
    ├─ lib/fetchTimeout.mjs  — 所有出站 fetch 的统一超时封装（默认 15s，超时抛 TimeoutError）
    ├─ lib/rateLimit.mjs     — 进程内滑动窗口限流（登录/注册/聊天/后台/埋点等都用它）
    ├─ lib/navValidation.mjs — 净值行入库校验（非正数/未来日期不入库）
+   ├─ lib/retryFetch.mjs    — Supabase 请求瞬时错误（401 issued-at-future / 网关 5xx / 读请求网络瞬断）重试一次
+   ├─ lib/dataQuality.mjs   — 关键字段空值统计与告警（刷新日志 + /api/health）
    └─ lib/agent/*           — 聊天 Agent：planner / session / tools / synth / rules ...
         ↓
 Supabase Postgres + Auth
@@ -105,7 +108,7 @@ Supabase Postgres + Auth
 
 前端 SDK 仅用于登录拿 `access_token`，所有业务读写走自家 `/api/*`，token 由 `Authorization` 头透传给服务端，用 admin client 校验。注册走 `/api/auth/signup` 是为了用 admin API 绕过邮箱验证（`email_confirm: true`）。**注册现在只校验邮箱+密码，开放注册，不再要邀请码**（早期的邀请码校验已移除，`invite_codes` 表与函数仅后台统计/留用）。
 
-**API 面（`server.mjs`）**：`/api/health`（探活：版本/数据更新时间/DB 连通）；业务 `/api/funds`（`?refresh=1` 全量重抓需 `DATA_REFRESH_TOKEN`/后台登录/本机直连，且单飞 + 冷却）、`/api/fund/:code`、`/api/chat?stream=1`（SSE；限流按用户，续写会话校验归属）、`/api/profile`、`/api/profile/ai/validate`（BYOK 存 Key 前校验）、`/api/favorites`、`/api/events`（前端 `track.js` 匿名埋点上报）；`POST /api/fund/:code/ai-summary`（用平台 Key 覆盖共享点评）仅限后台管理员；后台 `/api/admin/*`（login/verify/stats/behavior/users/invites/chats，用内存 token + `ADMIN_PASSWORD`）。登录/注册/后台登录/Key 校验/点评重生成/埋点/经理页代理都有限流；未预期异常只返回通用文案 + requestId，细节在服务端日志。
+**API 面（`server.mjs`）**：`/api/health`（探活：版本/数据更新时间/DB 连通/`dataQuality` 关键字段空值统计，`warn:true` 表示大面积缺失）；业务 `/api/funds`（`?refresh=1` 全量重抓需 `DATA_REFRESH_TOKEN`/后台登录/本机直连，且单飞 + 冷却）、`/api/fund/:code`、`/api/chat?stream=1`（SSE；限流按用户，续写会话校验归属）、`/api/profile`、`/api/profile/ai/validate`（BYOK 存 Key 前校验）、`/api/favorites`、`/api/events`（前端 `track.js` 匿名埋点上报）；`POST /api/fund/:code/ai-summary`（用平台 Key 覆盖共享点评）仅限后台管理员；后台 `/api/admin/*`（login/verify/stats/behavior/users/invites/chats，用内存 token + `ADMIN_PASSWORD`）。登录/注册/后台登录/Key 校验/点评重生成/埋点/经理页代理都有限流；未预期异常只返回通用文案 + requestId，细节在服务端日志。
 
 ### 表与 RLS（与代码强绑定）
 
@@ -139,6 +142,7 @@ Supabase Postgres + Auth
 - `rules.mjs` — 从 `rules/*.md` 加载策略卡片
 - `session.mjs` — 多轮会话状态
 - `shareClass.mjs` / `metrics.mjs` / `thematic.mjs` — 份额、指标、主题相关辅助
+- `hotTopics.mjs` / `hotTopicTrigger.mjs` — 热议推荐生成与触发判定（纯函数，同板块异动 24h 只生成一次）
 - 推荐问题话术在 `rules/suggestions.md`，由 `GET /api/chat/suggestions` 下发，支持占位符替换（回撤/夏普/评级等）
 
 ### 前端（`frontend/src/`）

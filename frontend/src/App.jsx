@@ -23,9 +23,12 @@ const ACCENT = "#3480F4";
 
 // 真实接口字段 → 原型组件期望字段（旧业务口径：purchaseStatus = 开放/限购/暂停/null）
 function normalizeFund(f) {
+  // 场内 ETF / 封闭期基金不能向基金公司申购，之前一律显示成"可申购"
   const status =
     f.purchaseStatus === "限购" ? "limit" :
-    f.purchaseStatus === "暂停" ? "stop" : "open";
+    f.purchaseStatus === "暂停" ? "stop" :
+    f.purchaseStatus === "场内交易" ? "exchange" :
+    f.purchaseStatus === "封闭" ? "closed" : "open";
   const hasReturn1y = typeof f.return1y === "number";
   const hasReturn3m = typeof f.return3m === "number";
   const hasReturn3y = typeof f.return3y === "number";

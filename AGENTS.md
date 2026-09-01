@@ -40,7 +40,7 @@ ES modules（`.mjs`，`type: module`）、两空格缩进、分号；JS 用 `cam
 
 ## 生产服务器
 
-线上 `funds.aisoup.ai`，PM2 进程名 `funds`（端口 3002，目录 `/www/wwwroot/funds`），本机 SSH 别名 `funds`。**服务器目录不是 git 仓库**，部署靠 rsync 同步 `server.mjs`、`lib/`、`public/`、`package.json`，再 `pm2 restart funds`。服务器 `.env` 独立维护，任何同步都不要覆盖。每日 07:00 的 crontab 调 `scripts/scheduled-refresh.mjs` 刷新数据。
+线上 `funds.aisoup.ai`，PM2 进程名 `funds`（端口 3002，目录 `/www/wwwroot/funds`），本机 SSH 别名 `funds`。**服务器目录不是 git 仓库**，部署靠 rsync 同步 `server.mjs`、`package.json`、`lib/`（排除 `stock analysis/`）、`scripts/`、`rules/`、`tests/`、`supabase/`、`public/`（`--delete`），再 `pm2 restart funds --update-env`、`curl 127.0.0.1:3002/api/health`。PM2 已配开机自启（systemd `pm2-root`，1.7.3 起）；进程列表变动后要 `pm2 save`。服务器 `.env` 独立维护，任何同步都不要覆盖。每日 07:00 的 crontab 调 `scripts/scheduled-refresh.mjs` 刷新数据。
 
 ## 安全与配置
 

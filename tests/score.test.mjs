@@ -52,3 +52,21 @@ test("百分位在同主题内计算，附带同类排名", () => {
   // 债券组第一名不再被科技组高分挤到低百分位（这是本次要修的核心问题）
   assert.equal(topB.peerRank, 1);
 });
+
+test("完全没有收益数据的基金不打分：score/label 为空，不占同类名次（修复：交银港股消费 A/C 无净值却得 82 分）", () => {
+  const noData = { code: "027450", theme: "消费", return6m: null, return1y: null, return3y: null, return3m: null, ageYears: null, risk: "高", discountFee: null };
+  assert.equal(computeRawScore(noData), null);
+  const peers = [
+    { code: "a", theme: "消费", return6m: -5, return1y: -10, return3y: null },
+    { code: "b", theme: "消费", return6m: 2, return1y: 4, return3y: null },
+    { code: "c", theme: "消费", return6m: 8, return1y: 12, return3y: null },
+    noData,
+  ];
+  applyPercentileScores(peers);
+  const nd = peers.find((f) => f.code === "027450");
+  assert.equal(nd.score, null);
+  assert.equal(nd.label, "数据不足");
+  assert.equal(nd.peerRank, null);
+  assert.equal(peers.find((f) => f.code === "c").peerCount, 3);
+  assert.equal(peers.find((f) => f.code === "c").peerRank, 1);
+});

@@ -50,13 +50,14 @@ import {
   claimInviteCode,
   releaseInviteCode,
   attachInviteCodeUser,
-  createInviteCodes,
-} from "./lib/store.mjs";
+  createInviteCodes, isDelistedCode } from "./lib/store.mjs";
 import { generateWithRetry, validateAiCredentials, generateFundSummary, generateFundDetailSummary } from "./lib/ai.mjs";
 import { encryptSecret, decryptSecret, maskSecret } from "./lib/crypto.mjs";
 import { publicConfig, supabaseAdmin } from "./lib/supabase.mjs";
 import { verifyToken } from "./lib/auth.mjs";
 import { HttpError, clientIp, isLoopbackDirect, resolvePublicPath, safeEqual, isUuid } from "./lib/http.mjs";
+import { isFresh } from "./lib/dataSchedule.mjs";
+import { summarizeDataQuality, formatMissingLine } from "./lib/dataQuality.mjs";
 import { signInWithEmailPassword, translateAuthError } from "./lib/authSignIn.mjs";
 import { plan as planAgent } from "./lib/agent/planner.mjs";
 import { runPlan } from "./lib/agent/tools.mjs";
@@ -97,6 +98,8 @@ const STARTED_AT = Date.now();
 // 数据刷新授权：配了 token 则请求需带 x-refresh-token；未配置时只放行本机直连（cron 打 127.0.0.1）
 const DATA_REFRESH_TOKEN = process.env.DATA_REFRESH_TOKEN || "";
 const REFRESH_COOLDOWN_MS = Number(process.env.DATA_REFRESH_COOLDOWN_MS || 10 * 60 * 1000);
+// 详情页持仓 / 资产配置缓存有效期（天）：季报每季一换，30 天足够
+const HOLDINGS_TTL_MS = Number(process.env.HOLDINGS_TTL_DAYS || 30) * 24 * 60 * 60 * 1000;
 const MAX_CHAT_MESSAGE_CHARS = 2000;
 const SECURITY_HEADERS = {
   "x-content-type-options": "nosniff",
@@ -105,6 +108,7 @@ const SECURITY_HEADERS = {
 };
 
 const mimeTypes = {
+  ".txt": "text/plain; charset=utf-8",
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -177,7 +181,7 @@ async function refreshFunds() {
   // 先把库里现有指标读出来：本次抓失败的字段回退到上次的值（见 lib/mergeMetrics.mjs）
   const prevByCode = new Map();
   try {
-    for (const f of await getAllFunds()) prevByCode.set(f.code, f);
+    for (const f of await getAllFunds({ includeDelisted: true })) prevByCode.set(f.code, f);
   } catch (err) {
     console.warn(`读取现有基金指标失败，本次不做回退：${err.message}`);
   }
@@ -195,7 +199,9 @@ async function refreshFunds() {
         }
       },
     });
-    console.log(`兜底通道补全完成：成功 ${stats.enriched} / 失败 ${stats.failed}，用时 ${((Date.now() - enrichStart) / 1000).toFixed(1)}s`);
+    // 分渠道计数：之前只要净值渠道成功就算"成功"，基本信息渠道（成立日期/申购费）失败两个月没人看见
+    console.log(`兜底通道补全完成：成功 ${stats.enriched} / 失败 ${stats.failed}（基本信息渠道 ${stats.basicOk}/${stats.total}，净值渠道 ${stats.returnsOk}/${stats.total}），用时 ${((Date.now() - enrichStart) / 1000).toFixed(1)}s`);
+    if (stats.total > 0 && stats.basicOk === 0) console.warn("⚠️ 基本信息接口（fundmobapi.eastmoney.com）本次全部失败：成立日期 / 日涨幅 / 申购费将沿用上次值或为空");
     applyPercentileScores(snapshot.funds);
   }
 
@@ -255,7 +261,7 @@ async function refreshFunds() {
     console.warn(`专业指标抓取跳过：${err.message}`);
   }
 
-  // 指标回退 + 缺失统计：让“今天有多少只没抓到规模/夏普”在日志里看得见
+  // 指标回退 + 缺失统计：抓失败的字段沿用上次值，并把所有关键字段的空值数写进日志 / 健康检查
   if (prevByCode.size) {
     const merged = fillMissingForAll(snapshot.funds, prevByCode);
     snapshot.funds = merged.funds;
@@ -266,9 +272,10 @@ async function refreshFunds() {
       .map(([k, n]) => `${FIELD_LABEL[k]} ${n} 只`);
     if (parts.length) console.log(`指标回退（本次抓取为空、沿用上次值）：${parts.join("，")}`);
   }
-  const missingAum = snapshot.funds.filter((f) => f.aumBillion === null || f.aumBillion === undefined).length;
-  const missingSharpe = snapshot.funds.filter((f) => f.sharpe1y === null || f.sharpe1y === undefined).length;
-  console.log(`指标缺失（回退后）：规模 ${missingAum} 只，夏普 ${missingSharpe} 只 / 共 ${snapshot.funds.length} 只`);
+  const quality = summarizeDataQuality(snapshot.funds);
+  lastDataQuality = quality;
+  console.log(`指标缺失（回退后）：${formatMissingLine(quality)} / 共 ${quality.total} 只`);
+  for (const w of quality.warnings) console.warn(`⚠️ 数据完整性告警：${w}`);
 
   await upsertFunds(snapshot.funds);
   await appendNavHistory(snapshot.funds);
@@ -350,10 +357,13 @@ async function attachAiSummaries(funds) {
 
 /** 列表快照，供详情页同类对比复用，避免每次打开抽屉都查全表 */
 let fundsListSnapshot = null;
+/** 最近一次数据完整性统计（刷新后 / 装载列表后更新），暴露在 /api/health */
+let lastDataQuality = null;
 
 function rememberFundsSnapshot(funds) {
   if (Array.isArray(funds) && funds.length) {
     fundsListSnapshot = funds;
+    lastDataQuality = summarizeDataQuality(funds);
   }
 }
 
@@ -446,9 +456,11 @@ async function loadFundDetailWithHistory(code, allFundsCache) {
       .catch(() => {});
   }
 
+  // 持仓/资产配置：缓存 30 天有效；有缓存先秒回，过期则后台重抓再落库（之前抓过一次就永远用缓存，季报换季也不更新）
   let holdingsResult;
   let assetAllocation;
-  if (detailRow?.holdings_fetched_at) {
+  const hasHoldingsCache = Boolean(detailRow?.holdings_fetched_at);
+  if (hasHoldingsCache) {
     holdingsResult = Array.isArray(detailRow.holdings_json)
       ? { holdings: detailRow.holdings_json, reportDate: detailRow.holdings_report_date || null }
       : { holdings: [], reportDate: null };
@@ -456,6 +468,8 @@ async function loadFundDetailWithHistory(code, allFundsCache) {
   } else {
     holdingsResult = { holdings: [], reportDate: null };
     assetAllocation = [];
+  }
+  if (!isFresh(detailRow?.holdings_fetched_at, HOLDINGS_TTL_MS)) {
     Promise.all([
       fetchFundHoldings(code),
       fetchAssetAllocation(code).catch(() => []),
@@ -523,6 +537,11 @@ async function loadFundDetailWithHistory(code, allFundsCache) {
 
 async function serveStatic(req, res) {
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+  // 未知的 /api/ 路径返回 404 JSON，而不是把首页 HTML 当 200 吐回去
+  if (url.pathname.startsWith("/api/")) {
+    json(res, 404, { error: "接口不存在" });
+    return;
+  }
   // 路径守卫：任何越界（../、编码的 ..%2f、同前缀兄弟目录）一律 404，不暴露目录结构
   const filePath = resolvePublicPath(PUBLIC_DIR, url.pathname);
   if (!filePath) {
@@ -588,6 +607,9 @@ const server = createServer(async (req, res) => {
         db,
         dataUpdatedAt,
         refreshing: Boolean(refreshInflight),
+        // 数据完整性：warn=true 表示有关键字段大面积为空（不影响 ok，避免探活把它当宕机重启）
+        dataQuality: lastDataQuality,
+        warn: Boolean(lastDataQuality?.warnings?.length),
       });
       return;
     }
@@ -614,9 +636,13 @@ const server = createServer(async (req, res) => {
       if (refresh) {
         // 全量重抓要打上千次外部请求，不能让匿名访客随手触发：需要 token / 后台登录 / 本机直连
         if (!refreshAuthorized(req)) throw new HttpError(401, "刷新数据需要授权（x-refresh-token 或后台登录）");
-        if (!refreshInflight && Date.now() - lastRefreshOkAt < REFRESH_COOLDOWN_MS) {
-          refresh = false;
-          refreshSkipped = "cooldown";
+        // 冷却以库里的更新时间为准（进程重启后 lastRefreshOkAt 归零，之前重启后第一次刷新会立刻跑全量）
+        if (!refreshInflight) {
+          const dbLastMs = Date.parse(await getLastUpdatedAt().catch(() => null)) || 0;
+          if (Date.now() - Math.max(lastRefreshOkAt, dbLastMs) < REFRESH_COOLDOWN_MS) {
+            refresh = false;
+            refreshSkipped = "cooldown";
+          }
         }
       }
       const snapshot = await loadOrRefresh(refresh);
@@ -631,6 +657,7 @@ const server = createServer(async (req, res) => {
 
     const detailMatch = url.pathname.match(/^\/api\/fund\/(\d{6})$/);
     if (detailMatch && req.method === "GET") {
+      if (isDelistedCode(detailMatch[1])) { json(res, 404, { error: "该基金已不在东方财富 QDII 列表中（可能已清盘或改类）" }); return; }
       const detail = await loadFundDetailWithHistory(detailMatch[1], fundsListSnapshot);
       json(res, 200, detail);
       return;
@@ -1531,6 +1558,8 @@ server.requestTimeout = 120_000;
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`QDII Fund Compass v${APP_VERSION} running at http://localhost:${PORT}`);
+  // 预热列表快照：让 /api/health 一启动就带数据完整性统计，而不是等第一个访客
+  getFundsSnapshot().catch(() => {});
   // 启动后自检：数据若早于"最近一个定时更新时刻"，后台补刷一次（不阻塞服务启动）
   catchUpRefreshOnBoot();
 });

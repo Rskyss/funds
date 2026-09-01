@@ -613,7 +613,7 @@ input, select { font: inherit; color: inherit; }
   gap: 18px;
 }
 @media (max-width: 1180px) { .fund-grid { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 780px) { .fund-grid { grid-template-columns: 1fr; } }
+@media (max-width: 780px) { .fund-grid { grid-template-columns: minmax(0, 1fr); } }
 
 /* ============== Fund Card (lightweight) ============== */
 .spark-svg { display: block; }
@@ -2519,7 +2519,7 @@ input, select { font: inherit; color: inherit; }
 @media (max-width: 720px) {
   .shell { padding: 0 14px 96px; }
   .boards { grid-template-columns: repeat(2, 1fr); }
-  .fund-grid { grid-template-columns: 1fr; }
+  .fund-grid { grid-template-columns: minmax(0, 1fr); }
   .toolbar { flex-wrap: wrap; }
   .drawer, .aidrawer { width: 100vw; max-width: 100vw; }
   .hero h1 { font-size: 26px; }
@@ -2837,3 +2837,23 @@ input, select { font: inherit; color: inherit; }
 .adm-retention { display: flex; align-items: baseline; gap: 14px; padding: 8px 0; }
 .adm-retention__big { font-size: 2.4rem; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; }
 .adm-retention__hint { font-size: 0.82rem; color: var(--ink-2); line-height: 1.6; }
+
+/* ============== 窄屏（手机）横向溢出修正 2026-09-01 ============== */
+@media (max-width: 480px) {
+  /* 网格列用 minmax(0,1fr)：1fr 的隐含 min-width:auto 会被卡片里 nowrap 内容撑到 434px，整页横向滚动 */
+  .fund-grid { grid-template-columns: minmax(0, 1fr); }
+  .fcard { min-width: 0; }
+  .fcard__head, .fcard__tags, .fcard__alts { min-width: 0; }
+  .fcard__alts { white-space: normal; }
+  .topbar__inner { gap: 10px; padding: 0 14px; }
+  .brand__sub { display: none; }
+  .page-foot__inner, .page-foot__meta { flex-wrap: wrap; white-space: normal; min-width: 0; }
+  .results-meta, .list-controls { flex-wrap: wrap; min-width: 0; max-width: 100%; row-gap: 8px; }
+  .results-meta > *, .list-controls > * { min-width: 0; }
+  .page-foot__meta > * { white-space: normal; }
+  .hero__meta-row { flex-wrap: wrap; gap: 6px 12px; }
+  .hero__time { white-space: normal; }
+  .fcard__numbers { flex-wrap: wrap; gap: 8px 12px; }
+  .fcard__secondary { align-items: flex-start; }
+  .fcard__stats, .fcard__returns-line, .rating-stars { white-space: normal; }
+}
