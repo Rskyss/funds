@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概览
 
-QDII 基金罗盘：本地运行的 QDII 基金查询/筛选/对比/AI 点评/聊天 Agent 的 Web 应用。当前版本 **1.6.0**（引入 BYOK：用户自带百炼 Key + 每用户模型设置）：
+QDII 基金罗盘：本地运行的 QDII 基金查询/筛选/对比/AI 点评/聊天 Agent 的 Web 应用。当前版本 **1.7.1**（1.6 引入 BYOK 用户自带百炼 Key；1.7 筛选多选/同类内评分；1.7.1 安全加固与工程补全）：
 
 - 前端：Vite + React 18，源码在 `frontend/`，`npm run build` 产出到 `public/`
 - 后端：Node 原生 HTTP 服务（`server.mjs`），无框架
@@ -22,8 +22,9 @@ npm install                              # 仅首次
 npm run build                            # 构建前端到 public/
 npm start                                # 启动 HTTP 服务（http://localhost:5173），服务的是 public/
 npm run preview                          # build + start 一条命令
+npm test                                 # 单元测试（node --test tests/*.test.mjs，不需要 .env）
 
-# 开发模式（双进程：后端 8787 + Vite 5173，Vite 代理 /api）
+# 开发模式（双进程：后端 8787 + Vite 5174，Vite 代理 /api；端口可用 BACKEND_PORT / FRONTEND_PORT 覆盖）
 npm run dev
 # 注意：系统 HTTP 代理可能导致 dev 页面空白，验收时改用 build + start
 
@@ -53,7 +54,7 @@ npm run auth:reset-password              # 重置某用户密码（reset-user-pa
 
 所有 Node 脚本都通过 `node --env-file=.env` 加载环境变量，**无需** 第三方 dotenv。改 `.env` 后必须重启服务。改 `frontend/` 源码后需要重新 `npm run build`（或用 `npm run dev` 热更新）。
 
-**没有测试套件、没有 linter**。后端/Agent 改动跑 `npm run agent:test`；抓取/解析改动跑对应 `data:*` 脚本核对落库结果；UI 改动 `build + start` 后浏览器实测。
+**有 `npm test` 单元测试（纯函数：评分、排行解析守卫、静态路径守卫、限流、出站超时、净值校验），没有 linter。** 后端/Agent 改动跑 `npm test`，聊天链路再跑 `npm run agent:test`（需 `AGENT_TEST_TOKEN`＝已配 BYOK 用户的 access_token）；抓取/解析改动跑对应 `data:*` 脚本核对落库结果；UI 改动 `build + start` 后浏览器实测；服务起来后 `GET /api/health` 看版本与数据库连通。
 
 ## 必需的环境变量
 
@@ -64,9 +65,10 @@ npm run auth:reset-password              # 重置某用户密码（reset-user-pa
 - `AI_KEY_SECRET` — **BYOK 用**：加解密每用户的百炼 Key（`lib/crypto.mjs`，存进 `user_profile.ai_api_key_cipher`）。改这个值会让已存的用户 Key 全部解不开
 - `DASHSCOPE_API_KEY` — 平台级 Key，用于**批量脚本**（短/长点评、向量生成）和未配 BYOK 时的兜底；聊天 Agent 现在**优先用用户自带 Key**
 - `DASHSCOPE_CHAT_MODELS` — 逗号分隔的聊天模型顺位列表，第一个不可用自动顺位降级（见 `lib/ai.mjs`）
-- `DASHSCOPE_MODEL` / `DASHSCOPE_MODEL_FAST` / `DASHSCOPE_MODEL_STRONG` / `DASHSCOPE_MODEL_STRONG_FALLBACK` — 不同任务（合成、规划、强模型、降级）用不同模型
+- `DASHSCOPE_MODEL` / `DASHSCOPE_MODEL_STRONG` — 少数未走模型链的直连调用用的单点模型（`MODEL_FAST` / `STRONG_FALLBACK` / `AGENT_MAX_TURNS` 已废弃，代码不再读取）
 - `DASHSCOPE_ENABLE_THINKING` / `DASHSCOPE_THINKING_BUDGET` — Qwen 思考模式开关与预算
-- `AGENT_MAX_TURNS` — Agent 最多轮次（默认 12）
+- `DATA_REFRESH_TOKEN` — 全量刷新授权：`GET /api/funds?refresh=1` 需带 `x-refresh-token`（或后台管理员登录态）；未配置时只接受本机直连（127.0.0.1 且未经反代）；`DATA_REFRESH_COOLDOWN_MS` 两次刷新最短间隔（默认 10 分钟）
+- `AGENT_RATE_LIMIT` / `FETCH_TIMEOUT_MS` / `DASHSCOPE_TIMEOUT_MS` / `DASHSCOPE_STREAM_TIMEOUT_MS` — 聊天限流与出站超时，有默认值
 - `TAVILY_API_KEY` — 留空则事件类问题降级
 - `DATA_UPDATE_TIME` — 首页「更新时间」展示对齐的定时批次（默认 `07:00` Asia/Shanghai）
 - `ADMIN_PASSWORD` — 后台管理（`/api/admin/*` + 前端 `Admin.jsx`）登录口令；未配置则后台接口返回 503
@@ -92,6 +94,10 @@ Node http server (server.mjs)
    ├─ lib/embedding.mjs     — 文档向量化（fund 文档检索）
    ├─ lib/dataSchedule.mjs  — 定时批次时间对齐与启动自检补刷
    ├─ lib/crypto.mjs        — BYOK 用户 Key 加解密 / 掩码（encryptSecret/decryptSecret/maskSecret）
+   ├─ lib/http.mjs          — HttpError / clientIp / resolvePublicPath（静态路径守卫）/ safeEqual / isUuid
+   ├─ lib/fetchTimeout.mjs  — 所有出站 fetch 的统一超时封装（默认 15s，超时抛 TimeoutError）
+   ├─ lib/rateLimit.mjs     — 进程内滑动窗口限流（登录/注册/聊天/后台/埋点等都用它）
+   ├─ lib/navValidation.mjs — 净值行入库校验（非正数/未来日期不入库）
    └─ lib/agent/*           — 聊天 Agent：planner / session / tools / synth / rules ...
         ↓
 Supabase Postgres + Auth
@@ -99,7 +105,7 @@ Supabase Postgres + Auth
 
 前端 SDK 仅用于登录拿 `access_token`，所有业务读写走自家 `/api/*`，token 由 `Authorization` 头透传给服务端，用 admin client 校验。注册走 `/api/auth/signup` 是为了用 admin API 绕过邮箱验证（`email_confirm: true`）。**注册现在只校验邮箱+密码，开放注册，不再要邀请码**（早期的邀请码校验已移除，`invite_codes` 表与函数仅后台统计/留用）。
 
-**API 面（`server.mjs`）**：业务 `/api/funds`、`/api/fund/:code`、`/api/chat?stream=1`（SSE）、`/api/profile`、`/api/profile/ai/validate`（BYOK 存 Key 前校验）、`/api/favorites`、`/api/events`（前端 `track.js` 匿名埋点上报）；后台 `/api/admin/*`（login/verify/stats/behavior/users/invites/chats，用内存 token + `ADMIN_PASSWORD`）。
+**API 面（`server.mjs`）**：`/api/health`（探活：版本/数据更新时间/DB 连通）；业务 `/api/funds`（`?refresh=1` 全量重抓需 `DATA_REFRESH_TOKEN`/后台登录/本机直连，且单飞 + 冷却）、`/api/fund/:code`、`/api/chat?stream=1`（SSE；限流按用户，续写会话校验归属）、`/api/profile`、`/api/profile/ai/validate`（BYOK 存 Key 前校验）、`/api/favorites`、`/api/events`（前端 `track.js` 匿名埋点上报）；`POST /api/fund/:code/ai-summary`（用平台 Key 覆盖共享点评）仅限后台管理员；后台 `/api/admin/*`（login/verify/stats/behavior/users/invites/chats，用内存 token + `ADMIN_PASSWORD`）。登录/注册/后台登录/Key 校验/点评重生成/埋点/经理页代理都有限流；未预期异常只返回通用文案 + requestId，细节在服务端日志。
 
 ### 表与 RLS（与代码强绑定）
 
@@ -112,17 +118,17 @@ Supabase Postgres + Auth
 - `events`：匿名行为埋点（前端 `track.js` → `/api/events` → `insertEvents`），后台行为分析用
 - `invite_codes`：邀请码（`code` / `status` / `expires_at` / `used_at` / `used_by`）——注册已不强制，仅后台统计与 `invite:gen` 留用
 
-`favorites` 与 `user_profile` 走 RLS；其它表关 RLS 公开读。
+所有表都开了 RLS：基金类表（`funds` / `nav_history` / `fund_details` / `fund_ai_summary` / `chat_hot_suggestions`）公开只读；`favorites` 仅本人；`user_profile` / `chat_sessions` / `chat_logs` / `fund_doc_chunks` / `events` / `invite_codes` 对浏览器侧**无任何策略也无表权限**，只有服务端 service role 能读写（1.7.1 收口——之前四张表的 `*_admin_all` 策略是对公网全开的）。结构定义在 `supabase/migrations/`。
 
-**字段命名规则**：DB `snake_case`（`fund_type`, `nav_date`, `return_1y`），JS `camelCase`（`fundType`, `date`, `return1y`）。所有转换集中在 `lib/store.mjs` 的 `fundToRow` / `rowToFund`。新增字段必须 Supabase migration、mapper、调用点三处同步。
+**字段命名规则**：DB `snake_case`（`fund_type`, `nav_date`, `return_1y`），JS `camelCase`（`fundType`, `date`, `return1y`）。所有转换集中在 `lib/store.mjs` 的 `fundToRow` / `rowToFund`。新增字段必须 `supabase/migrations/` 新文件（并以同名应用到线上）、mapper、调用点三处同步。
 
 ### 关键模块约束
 
-- `lib/eastmoney.mjs` 解析东方财富私有格式：基金排行接口（完整收益数据）+ 基金代码库（兜底，让没上排行的 QDII 也出现）。排行接口用 `vm.runInNewContext` 解 `var rankData = {...}`；要换数据源先看 `parseRankData` 和 `fetchQdiiUniverse`。
+- `lib/eastmoney.mjs` 解析东方财富私有格式：基金排行接口（完整收益数据）+ 基金代码库（兜底，让没上排行的 QDII 也出现）。排行接口用 `vm.runInNewContext` 解 `var rankData = {...}`；要换数据源先看 `parseRankData` 和 `fetchQdiiUniverse`。所有 fetch 走 `lib/fetchTimeout.mjs`；抓取失败一律**抛错**（不再返回空值，否则脚本会把空结果连同 `*_fetched_at` 一起落库、之后永久跳过）；`parseFundRow` 字段数不足返回 null，整批解析失败中止刷新。
 - `classifyFund(name)` 是纯字符串关键词规则，给基金打 `region/theme/fundType/role/risk` 五标签，改了要重刷数据才会重算落库。评分为**同主题内**百分位（`applyPercentileScores` 按 `theme` 分组，附 `peerRank`/`peerCount`；不足 6 只标"同类样本少"），服务读库时实时重算，改公式重启即生效、无需重刷数据；纯函数单测在 `tests/score.test.mjs`（`node --test tests/*.test.mjs`）。
 - `buildStructuredAnalysis` 输出结构化分析对象给详情抽屉用，**不走 AI**；AI 点评（一句话）由 `lib/ai.mjs` 生成、单独存 `fund_ai_summary` 表。
 - `loadOrRefresh` 是兜底加载：DB 没数据时自动抓一次；用户主动刷新需要 `?refresh=1`。
-- `lib/dataSchedule.mjs` 在服务启动时自检：数据早于最近 `DATA_UPDATE_TIME` 批次会后台补刷。
+- `lib/dataSchedule.mjs` 在服务启动时自检：数据早于最近 `DATA_UPDATE_TIME` 批次会后台补刷。所有全量刷新都经 `server.mjs` 的 `runRefreshOnce()` 单飞（并发触发共用一个 Promise）。线上每日 07:00 由服务器 root crontab 调 `scripts/scheduled-refresh.mjs`（带 flock），日志在 `/www/wwwroot/funds/logs/data-refresh.log`。
 - 详情接口复用列表内存快照，减少重复查询；持仓和费率在详情请求里异步补抓，首屏先返回再后台补。
 
 ### 聊天 Agent（`lib/agent/`）
@@ -149,8 +155,10 @@ Supabase Postgres + Auth
 ## 工作约定
 
 - 改任何抓取/解析逻辑前，先 curl 或浏览器看一眼东方财富接口当前返回——格式漂移过几次
-- 改表结构要三处同步：Supabase 控制台 migration + `lib/store.mjs` mapper + 所有用到该字段的代码
-- 改 Agent 行为优先改 `rules/*.md`（无需重启编辑），其次才动 `lib/agent/`
-- 历任开发文档在 `docs/qdii-supabase接入/`，含 ALIGNMENT/CONSENSUS/DESIGN/TASK/ACCEPTANCE/FINAL/TODO（6A 工作流产物）；前端重设计在 `docs/前端重设计/`；Agent 架构在 `docs/ai-agent/`；阶段性进度记录在 `docs/开发进度跟踪.md`
+- 改表结构要三处同步：`supabase/migrations/` 加新文件并以同名应用到线上（CLI `db push` / MCP `apply_migration`）+ `lib/store.mjs` mapper + 所有用到该字段的代码；规矩见 `supabase/README.md`
+- 改 Agent 行为优先改 `rules/*.md`（**改后需重启服务**，卡片在进程内永久缓存），其次才动 `lib/agent/`
+- 历任开发文档在 `docs/qdii-supabase接入/`，含 ALIGNMENT/CONSENSUS/DESIGN/TASK/ACCEPTANCE/FINAL/TODO（6A 工作流产物）；前端重设计在 `docs/前端重设计/`；Agent 架构在 `docs/ai-agent/`；1.7.1 安全加固在 `docs/安全加固_1.7.1/`；总台账在 `docs/开发进度跟踪.md`（每个任务完成必须登记）
+- 部署到生产走 rsync（服务器目录不是 git 仓库），见 `AGENTS.md`「生产服务器」
+- 推送规则：一个版本＝远端恰好一个提交，标题 `vX.Y 一句话主题`，正文分「新增功能 / 优化功能 / 修复bug」；`.githooks/pre-push` 拦截不合规标题（`git config core.hooksPath .githooks` 启用）；不发版就不推 main；推送/tag/部署先经用户指示
 - `outputs/` 是脚本产物，已 Git 忽略
 - `.env` 已在 `.gitignore`，发版前确认仓库只有 `.env.example`

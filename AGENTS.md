@@ -1,55 +1,47 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
+（详细的架构、表结构与工作约定见 `CLAUDE.md`，两份文档以 `CLAUDE.md` 为准。）
 
-This repository is a local QDII fund analysis web app with a plain Node.js server and static browser UI.
+## 项目结构
 
-- `server.mjs` contains the HTTP server and API routes.
-- `lib/` holds core server modules: Supabase access, auth, Eastmoney scraping/parsing, AI calls, embeddings, and agent orchestration.
-- `public/` contains the browser app (`index.html`, `app.js`, `auth.js`, `chart.js`, `styles.css`).
-- `scripts/` contains operational jobs for backfills, refreshes, summary generation, embeddings, and agent case checks.
-- `rules/` stores strategy and prompt rule cards consumed by the agent.
-- `docs/` stores architecture and planning notes.
-- `outputs/` contains generated report artifacts; treat it as derived output.
+- `server.mjs` — 原生 Node HTTP 服务与全部 `/api/*` 路由（无框架）
+- `lib/` — 服务端模块：Supabase 访问（`store.mjs`）、鉴权、东方财富抓取解析（`eastmoney.mjs`）、AI 调用（`ai.mjs`）、向量、聊天 Agent（`lib/agent/`）、HTTP 工具（`http.mjs` / `fetchTimeout.mjs` / `rateLimit.mjs`）
+- `frontend/` — Vite + React 18 源码；`npm run build` 产出到 `public/`（构建产物随仓库提交，服务直接托管 `public/`）
+- `public_legacy/` — v1.2 原生 JS 前端归档，仅供回滚参考
+- `supabase/migrations/` — 数据库结构的唯一权威定义，按文件名顺序可从零重放
+- `scripts/` — 数据回填、定时刷新、AI 点评批量生成、向量入库、Agent 用例
+- `rules/` — Agent 策略卡片（Markdown），改动后需重启服务生效
+- `tests/` — `node --test` 单元测试（纯函数：评分、解析守卫、路径守卫、限流、超时、净值校验）
+- `docs/` — 6A 工作流文档与开发进度台账（`docs/开发进度跟踪.md`）
 
-## Build, Test, and Development Commands
+## 常用命令
 
-- `npm install` installs dependencies.
-- `npm start` runs the local server with `node --env-file=.env server.mjs`; open `http://localhost:5173`.
-- `npm run data:refresh` refreshes scheduled fund data.
-- `npm run data:f10`, `data:metrics`, `data:holdings`, `data:managers`, and `data:fees` run targeted backfills.
-- `npm run ai:generate` generates cached AI summaries. Use `-- --limit 10` for a small batch or `-- --force` to overwrite.
-- `npm run agent:test` runs scripted agent cases from `scripts/test-agent-cases.mjs`.
+- `npm install` / `npm run build` / `npm start`（http://localhost:5173）
+- `npm test` — 单元测试（不需要 .env）
+- `npm run dev` — 后端 8787 + Vite 热更新
+- `npm run data:refresh` — 触发全量刷新（需要 `.env` 里的 `DATA_REFRESH_TOKEN`，或在服务器本机直连）
+- `npm run agent:test` — Agent 端到端用例（需 `AGENT_TEST_TOKEN`）
+- 改 `.env` 需重启服务；改 `frontend/` 需重新 `npm run build`
 
-There is no build step or bundler. Restart `npm start` after changing `.env`; otherwise refresh the browser after frontend edits.
+## 代码风格
 
-## Coding Style & Naming Conventions
+ES modules（`.mjs`，`type: module`）、两空格缩进、分号；JS 用 `camelCase`，数据库列用 `snake_case`，DB↔JS 映射只在 `lib/store.mjs`。前端是 React 函数组件；请求统一走 `frontend/src/api.js`（超时、错误文案、401 登出）。
 
-Use ES modules (`.mjs` and `type: module`) and plain JavaScript. Follow the existing style: two-space indentation, semicolons, `camelCase` for JavaScript identifiers, and `snake_case` for database fields. Keep DB-to-JS mapping in `lib/store.mjs` (`fundToRow`, `rowToFund`).
+## 测试与验证
 
-Frontend code is framework-free. Prefer small functions, direct DOM updates, and existing helpers.
+- 单元测试：`npm test`
+- 抓取/解析改动：跑对应 `data:*` 脚本核对落库
+- UI 改动：`npm run build && npm start` 后浏览器实测
+- 健康检查：`GET /api/health`（含版本、数据更新时间、数据库连通性）
 
-## Testing Guidelines
+## 提交与发版
 
-This project has no formal unit test framework or coverage gate. For backend or agent changes, run `npm run agent:test` when relevant. For parsing changes, run the smallest matching backfill or refresh command and verify records. For UI changes, run `npm start` and check `http://localhost:5173`.
+本地开发期可以小步提交；**推向 `main` 前必须 squash 成恰好一个提交**，标题 `vX.Y 一句话主题`（修订版写 `vX.Y.Z`），正文按「新增功能 / 优化功能 / 修复bug」分组、用产品语言，并打同名 tag + GitHub Release。`main` 上不允许 `docs:` / `fix:` 之类的零碎提交；`.githooks/pre-push` 会机械拦截不合规标题（clone 后执行一次 `git config core.hooksPath .githooks` 启用）。推送、打 tag、部署都是对外动作，先经用户明确指示。
 
-## Commit & Pull Request Guidelines
+## 生产服务器
 
-This checkout has no Git history, so no repository-specific convention can be inferred. Use short, imperative commit messages such as `Add fund fee backfill` or `Fix agent rule loading`.
+线上 `funds.aisoup.ai`，PM2 进程名 `funds`（端口 3002，目录 `/www/wwwroot/funds`），本机 SSH 别名 `funds`。**服务器目录不是 git 仓库**，部署靠 rsync 同步 `server.mjs`、`lib/`、`public/`、`package.json`，再 `pm2 restart funds`。服务器 `.env` 独立维护，任何同步都不要覆盖。每日 07:00 的 crontab 调 `scripts/scheduled-refresh.mjs` 刷新数据。
 
-Pull requests should include a summary, affected areas (`server`, `lib/store`, `public`, `scripts`), commands run, and screenshots for UI changes. Link issues or task docs when available.
+## 安全与配置
 
-## 生产服务器登录
-
-线上 `funds.aisoup.ai` 部署在远程服务器，本机已配置 SSH 免密别名，直接用即可，无需密码、无需逐个尝试：
-
-- 登录：`ssh funds`
-- 服务进程：PM2 名为 `funds`（端口 `3002`，目录 `/www/wwwroot/funds`）
-- 看日志：`ssh funds "pm2 logs funds --lines 120 --nostream"`
-- 发版后重启：`ssh funds "pm2 restart funds"`
-
-别名 `funds` 定义在开发者本机的 `~/.ssh/config`（公钥免密登录）。服务器地址、账号、密码等敏感信息只保留在本地，不写入本仓库。
-
-## Security & Configuration Tips
-
-Copy `.env.example` to `.env`. Do not commit `.env` or secrets. Required Supabase variables are `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, and `SUPABASE_PUBLISHABLE_KEY`; DashScope variables are only needed for AI summary or agent paths.
+复制 `.env.example` 为 `.env`，永远不要提交 `.env`。必填 `SUPABASE_URL` / `SUPABASE_SECRET_KEY` / `SUPABASE_PUBLISHABLE_KEY`；BYOK 需 `AI_KEY_SECRET`（上线后不可改）；刷新授权用 `DATA_REFRESH_TOKEN`。

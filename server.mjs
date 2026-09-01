@@ -56,6 +56,7 @@ import { generateWithRetry, validateAiCredentials, generateFundSummary, generate
 import { encryptSecret, decryptSecret, maskSecret } from "./lib/crypto.mjs";
 import { publicConfig, supabaseAdmin } from "./lib/supabase.mjs";
 import { verifyToken } from "./lib/auth.mjs";
+import { HttpError, clientIp, isLoopbackDirect, resolvePublicPath, safeEqual, isUuid } from "./lib/http.mjs";
 import { signInWithEmailPassword, translateAuthError } from "./lib/authSignIn.mjs";
 import { plan as planAgent } from "./lib/agent/planner.mjs";
 import { runPlan } from "./lib/agent/tools.mjs";
@@ -66,6 +67,7 @@ import { suggestionTemplates } from "./lib/agent/rules.mjs";
 import { getActiveHotSuggestions, maybeRefreshHotSuggestions } from "./lib/agent/hotTopics.mjs";
 import { formatDataUpdateDisplay, scheduledUpdateBefore } from "./lib/dataSchedule.mjs";
 import { mergeShareClassCards } from "./lib/agent/shareClass.mjs";
+import { fillMissingForAll } from "./lib/mergeMetrics.mjs";
 
 // 读取登录用户的聊天凭证（apiKey + 投问模型）；未配置/解密失败返回 null。
 async function loadChatCreds(userId) {
@@ -88,6 +90,19 @@ async function loadReviewCreds(userId) {
 const PORT = Number(process.env.PORT || 5173);
 const ROOT = process.cwd();
 const PUBLIC_DIR = path.join(ROOT, "public");
+const APP_VERSION = await readFile(path.join(ROOT, "package.json"), "utf8")
+  .then((s) => JSON.parse(s).version)
+  .catch(() => "unknown");
+const STARTED_AT = Date.now();
+// 数据刷新授权：配了 token 则请求需带 x-refresh-token；未配置时只放行本机直连（cron 打 127.0.0.1）
+const DATA_REFRESH_TOKEN = process.env.DATA_REFRESH_TOKEN || "";
+const REFRESH_COOLDOWN_MS = Number(process.env.DATA_REFRESH_COOLDOWN_MS || 10 * 60 * 1000);
+const MAX_CHAT_MESSAGE_CHARS = 2000;
+const SECURITY_HEADERS = {
+  "x-content-type-options": "nosniff",
+  "x-frame-options": "SAMEORIGIN",
+  "referrer-policy": "strict-origin-when-cross-origin",
+};
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -127,22 +142,31 @@ async function fundsPayload(funds, fetchedAtIso) {
   };
 }
 
+const MAX_BODY_BYTES = 1_000_000;
 async function readBody(req) {
   return new Promise((resolve, reject) => {
-    let raw = "";
+    const chunks = [];
+    let bytes = 0;
+    let overflow = false;
     req.on("data", (chunk) => {
-      raw += chunk;
-      if (raw.length > 1e6) {
-        req.destroy();
-        reject(new Error("请求体过大"));
+      if (overflow) return;
+      bytes += chunk.length;
+      if (bytes > MAX_BODY_BYTES) {
+        // 不直接 destroy：先让上层回 413，响应结束后 Node 会因请求体未读完而关闭连接
+        overflow = true;
+        req.pause();
+        reject(new HttpError(413, "请求体过大"));
+        return;
       }
+      chunks.push(chunk);
     });
     req.on("end", () => {
-      if (!raw) return resolve({});
+      if (overflow) return;
+      if (!bytes) return resolve({});
       try {
-        resolve(JSON.parse(raw));
-      } catch (err) {
-        reject(new Error("请求体不是合法 JSON"));
+        resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+      } catch {
+        reject(new HttpError(400, "请求体不是合法 JSON"));
       }
     });
     req.on("error", reject);
@@ -150,6 +174,13 @@ async function readBody(req) {
 }
 
 async function refreshFunds() {
+  // 先把库里现有指标读出来：本次抓失败的字段回退到上次的值（见 lib/mergeMetrics.mjs）
+  const prevByCode = new Map();
+  try {
+    for (const f of await getAllFunds()) prevByCode.set(f.code, f);
+  } catch (err) {
+    console.warn(`读取现有基金指标失败，本次不做回退：${err.message}`);
+  }
   const snapshot = await fetchQdiiFunds();
   const fallbackCount = snapshot.funds.filter((f) => f.source === "东方财富基金代码库").length;
   console.log(`主通道抓取完成：${snapshot.total} 只（兜底通道占 ${fallbackCount} 只，需要补全）`);
@@ -192,8 +223,9 @@ async function refreshFunds() {
   const metricsStart = Date.now();
   console.log(`抓取规模/经理/夏普/波动率 ${codes.length} 只...`);
   try {
+    // 并发 10 会触发东财 HTTP 514 限流（2026-09-01 实测：约 20% 基金抓空），降到 5 并配合 withRetry 的限流退避
     const metrics = await fetchProfilesAndMetricsConcurrently(codes, {
-      concurrency: 10,
+      concurrency: Number(process.env.METRICS_REFRESH_CONCURRENCY || 5),
       onProgress: (done, total) => {
         if (done === total || done % 100 === 0) {
           console.log(`  专业指标进度 ${done}/${total}`);
@@ -222,6 +254,18 @@ async function refreshFunds() {
   } catch (err) {
     console.warn(`专业指标抓取跳过：${err.message}`);
   }
+
+  // 指标回退 + 缺失统计：让“今天有多少只没抓到规模/夏普”在日志里看得见
+  if (prevByCode.size) {
+    const merged = fillMissingForAll(snapshot.funds, prevByCode);
+    snapshot.funds = merged.funds;
+    if (merged.restoredFunds) {
+      console.log(`指标回退：${merged.restoredFunds} 只基金共 ${merged.restoredFields} 个字段本次抓取为空，沿用上次值`);
+    }
+  }
+  const missingAum = snapshot.funds.filter((f) => f.aumBillion === null || f.aumBillion === undefined).length;
+  const missingSharpe = snapshot.funds.filter((f) => f.sharpe1y === null || f.sharpe1y === undefined).length;
+  console.log(`指标缺失（回退后）：规模 ${missingAum} 只，夏普 ${missingSharpe} 只 / 共 ${snapshot.funds.length} 只`);
 
   await upsertFunds(snapshot.funds);
   await appendNavHistory(snapshot.funds);
@@ -270,6 +314,27 @@ async function refreshFunds() {
   return snapshot;
 }
 
+// 全量刷新单飞：同一时刻只跑一份，并发触发（cron + 启动自检 + 手动）共用同一个 Promise。
+let refreshInflight = null;
+let lastRefreshOkAt = 0;
+function runRefreshOnce() {
+  if (refreshInflight) return refreshInflight;
+  refreshInflight = refreshFunds()
+    .then((snap) => { lastRefreshOkAt = Date.now(); return snap; })
+    .finally(() => { refreshInflight = null; });
+  return refreshInflight;
+}
+
+function refreshAuthorized(req) {
+  if (DATA_REFRESH_TOKEN) {
+    const supplied = req.headers["x-refresh-token"];
+    if (typeof supplied === "string" && safeEqual(supplied, DATA_REFRESH_TOKEN)) return true;
+  }
+  if (checkAdminToken(req)) return true;
+  if (!DATA_REFRESH_TOKEN && isLoopbackDirect(req)) return true;
+  return false;
+}
+
 async function attachAiSummaries(funds) {
   const map = await getAllAiSummaries();
   return funds.map((f) => {
@@ -301,7 +366,7 @@ async function loadOrRefresh(refresh) {
   // 列表响应折叠同基金多份额（主份额出卡、其余进 altShares）；
   // 内存快照 rememberFundsSnapshot 保留全量，详情同类对比与聊天 Agent 不受影响
   if (refresh) {
-    const snapshot = await refreshFunds();
+    const snapshot = await runRefreshOnce();
     const withAi = await attachAiSummaries(snapshot.funds);
     rememberFundsSnapshot(withAi);
     const merged = mergeShareClassCards(withAi);
@@ -323,7 +388,7 @@ async function loadOrRefresh(refresh) {
       funds: merged,
     };
   }
-  const snapshot = await refreshFunds();
+  const snapshot = await runRefreshOnce();
   const withAi = await attachAiSummaries(snapshot.funds);
   rememberFundsSnapshot(withAi);
   const merged = mergeShareClassCards(withAi);
@@ -454,19 +519,19 @@ async function loadFundDetailWithHistory(code, allFundsCache) {
 }
 
 async function serveStatic(req, res) {
-  const url = new URL(req.url, `http://${req.headers.host}`);
-  const safePath = url.pathname === "/" ? "/index.html" : decodeURIComponent(url.pathname);
-  const filePath = path.normalize(path.join(PUBLIC_DIR, safePath));
-  if (!filePath.startsWith(PUBLIC_DIR)) {
-    res.writeHead(403);
-    res.end("Forbidden");
+  const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+  // 路径守卫：任何越界（../、编码的 ..%2f、同前缀兄弟目录）一律 404，不暴露目录结构
+  const filePath = resolvePublicPath(PUBLIC_DIR, url.pathname);
+  if (!filePath) {
+    res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+    res.end("Not found");
     return;
   }
   try {
     const ext = path.extname(filePath);
     const body = await readFile(filePath);
     // 带内容哈希的构建产物可永久缓存；HTML 入口必须每次校验，否则刷新拿不到新代码
-    const isHashedAsset = safePath.startsWith("/assets/");
+    const isHashedAsset = filePath.startsWith(path.join(PUBLIC_DIR, "assets") + path.sep);
     const cacheControl = isHashedAsset
       ? "public, max-age=31536000, immutable"
       : "no-cache";
@@ -498,8 +563,32 @@ async function requireUser(req, res) {
 }
 
 const server = createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host}`);
+  const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+  for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
   try {
+    if (url.pathname === "/api/health" && req.method === "GET") {
+      let db = "ok";
+      let dataUpdatedAt = null;
+      try {
+        dataUpdatedAt = await Promise.race([
+          getLastUpdatedAt(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("db timeout")), 3000)),
+        ]);
+      } catch {
+        db = "error";
+      }
+      const ok = db === "ok";
+      json(res, ok ? 200 : 503, {
+        ok,
+        version: APP_VERSION,
+        uptimeSec: Math.round((Date.now() - STARTED_AT) / 1000),
+        db,
+        dataUpdatedAt,
+        refreshing: Boolean(refreshInflight),
+      });
+      return;
+    }
+
     if (url.pathname === "/api/config") {
       json(res, 200, publicConfig);
       return;
@@ -517,9 +606,18 @@ const server = createServer(async (req, res) => {
     }
 
     if (url.pathname === "/api/funds" && req.method === "GET") {
-      const refresh = url.searchParams.get("refresh") === "1";
+      let refresh = url.searchParams.get("refresh") === "1";
+      let refreshSkipped = null;
+      if (refresh) {
+        // 全量重抓要打上千次外部请求，不能让匿名访客随手触发：需要 token / 后台登录 / 本机直连
+        if (!refreshAuthorized(req)) throw new HttpError(401, "刷新数据需要授权（x-refresh-token 或后台登录）");
+        if (!refreshInflight && Date.now() - lastRefreshOkAt < REFRESH_COOLDOWN_MS) {
+          refresh = false;
+          refreshSkipped = "cooldown";
+        }
+      }
       const snapshot = await loadOrRefresh(refresh);
-      json(res, 200, snapshot);
+      json(res, 200, refreshSkipped ? { ...snapshot, refreshSkipped } : snapshot);
       // 每次"刷新数据"后（含每日 07:00 定时刷新）顺带检查一次热议是否需要更新；
       // 后台异步、失败静默，不影响响应；模块内部有 inflight 去重与触发条件判断
       if (refresh && snapshot?.funds?.length) {
@@ -537,6 +635,9 @@ const server = createServer(async (req, res) => {
 
     const managerMatch = url.pathname.match(/^\/api\/manager\/(\d+)$/);
     if (managerMatch && req.method === "GET") {
+      // 这是对东财的实时代理抓取，按 IP 限流，避免被当成跳板
+      const rl = rateLimit(`manager:${clientIp(req)}`, { limit: 30 });
+      if (!rl.allowed) throw new HttpError(429, "请求太频繁，请稍后再试");
       const profile = await fetchManagerProfile(managerMatch[1]);
       json(res, 200, profile);
       return;
@@ -544,6 +645,8 @@ const server = createServer(async (req, res) => {
 
     const regenMatch = url.pathname.match(/^\/api\/fund\/(\d{6})\/ai-summary$/);
     if (regenMatch && req.method === "POST") {
+      // 用平台 Key 重生成并覆盖全站共享点评：运营动作，仅限后台管理员
+      if (!checkAdminToken(req)) throw new HttpError(403, "该操作仅限后台管理员");
       const code = regenMatch[1];
       const funds = await getAllFunds();
       const fund = funds.find((f) => f.code === code);
@@ -562,6 +665,8 @@ const server = createServer(async (req, res) => {
       const code = previewMatch[1];
       const tokenUser = await verifyToken(req.headers["authorization"]).catch(() => null);
       if (!tokenUser?.userId) { json(res, 401, { error: "请先登录" }); return; }
+      const rlPreview = rateLimit(`ai:preview:${tokenUser.userId}`, { limit: 6 });
+      if (!rlPreview.allowed) throw new HttpError(429, "重新生成太频繁，请稍后再试");
       const creds = await loadReviewCreds(tokenUser.userId);
       if (!creds) { json(res, 403, { error: "请先在「模型设置」中填写 API Key 与短/长评模型", code: "NO_AI_KEY" }); return; }
       const funds = await getAllFunds();
@@ -594,10 +699,7 @@ const server = createServer(async (req, res) => {
         .eq("user_id", tokenUser.userId)
         .order("updated_at", { ascending: false })
         .limit(50);
-      if (error) {
-        json(res, 500, { error: error.message });
-        return;
-      }
+      if (error) throw new Error(`chat_sessions 查询失败: ${error.message}`);
       const sessions = (data || []).map((row) => {
         const msgs = Array.isArray(row.state?.messages) ? row.state.messages : [];
         const firstUser = msgs.find((m) => m.role === "user");
@@ -673,6 +775,8 @@ const server = createServer(async (req, res) => {
     if (url.pathname === "/api/profile/ai/validate" && req.method === "POST") {
       const tokenUser = await verifyToken(req.headers["authorization"]).catch(() => null);
       if (!tokenUser?.userId) { json(res, 401, { error: "请先登录" }); return; }
+      const rlValidate = rateLimit(`ai:validate:${tokenUser.userId}`, { limit: 6 });
+      if (!rlValidate.allowed) throw new HttpError(429, "校验太频繁，请稍后再试");
       const body = await readBody(req);
       const key = typeof body.aiApiKey === "string" ? body.aiApiKey.trim() : "";
       if (!key) { json(res, 400, { error: "请填写 API Key" }); return; }
@@ -687,6 +791,8 @@ const server = createServer(async (req, res) => {
         json(res, 401, { error: "请先登录" });
         return;
       }
+      const rlProfile = rateLimit(`profile:${tokenUser.userId}`, { limit: 20 });
+      if (!rlProfile.allowed) throw new HttpError(429, "操作太频繁，请稍后再试");
       const body = await readBody(req);
       if (body.clearAiKey === true) {
         await clearUserAiConfig(tokenUser.userId);
@@ -748,16 +854,26 @@ const server = createServer(async (req, res) => {
       }
       const tokenUser = await verifyToken(req.headers["authorization"]).catch(() => null);
       const userId = tokenUser?.userId || null;
-      const ip = (req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "").toString().split(",")[0].trim();
-      const session = await loadSession(body.sessionId);
-      const sessionId = session.sessionId || randomUUID();
-      const rl = rateLimit(`chat:${sessionId}:${ip}`);
+      const ip = clientIp(req);
+      // 限流按登录用户（未登录按 IP）计数；旧实现把客户端可控的 sessionId 拼进 key，换个 id 就是新额度
+      const rl = rateLimit(`chat:${userId || ip}`);
       if (!rl.allowed) {
         const retrySec = Math.max(1, Math.ceil(rl.retryAfterMs / 1000));
         res.setHeader("Retry-After", String(retrySec));
         json(res, 429, { error: `请求太频繁，${retrySec}s 后再试`, limit: rl.limit });
         return;
       }
+      if (userMessage.length > MAX_CHAT_MESSAGE_CHARS) {
+        json(res, 400, { error: `问题太长了，请控制在 ${MAX_CHAT_MESSAGE_CHARS} 字以内` });
+        return;
+      }
+      const session = await loadSession(isUuid(body.sessionId) ? body.sessionId : null);
+      // 会话归属：别人的会话不能续写（/api/chat/history 早有这条校验，这里之前漏了）
+      if (!session.isNew && session.userId && session.userId !== userId) {
+        json(res, 403, { error: "无权访问该会话" });
+        return;
+      }
+      const sessionId = session.sessionId || randomUUID();
       const history = Array.isArray(session.state.messages) ? session.state.messages : [];
       const userProfile = userId ? await getUserProfile(userId).catch(() => null) : null;
       const chatCreds = await loadChatCreds(userId);
@@ -851,7 +967,8 @@ const server = createServer(async (req, res) => {
           send("done", {});
         } catch (err) {
           errMsg = err.message;
-          send("error", { message: err.message });
+          console.error("[chat/stream]", err);
+          send("error", { message: err instanceof HttpError ? err.message : "服务暂时不可用，请稍后再试" });
         } finally {
           logChatTurn({
             sessionId,
@@ -955,17 +1072,27 @@ const server = createServer(async (req, res) => {
     }
 
     if (url.pathname === "/api/auth/signin" && req.method === "POST") {
+      const ip = clientIp(req);
       const body = await readBody(req);
+      const emailKey = String(body.email || "").trim().toLowerCase();
+      // 防暴力试密码：按 IP 与按邮箱各一道
+      if (!rateLimit(`auth:signin:ip:${ip}`, { limit: 10 }).allowed || (emailKey && !rateLimit(`auth:signin:email:${emailKey}`, { limit: 5, windowMs: 5 * 60_000 }).allowed)) {
+        throw new HttpError(429, "登录尝试太频繁，请稍后再试");
+      }
       try {
         const session = await signInWithEmailPassword(body.email, body.password);
         json(res, 200, { session });
       } catch (err) {
-        json(res, err.code || 401, { error: err.message || translateAuthError("Invalid login credentials") });
+        const status = [400, 401, 403, 422, 429].includes(err.code) ? err.code : 401;
+        json(res, status, { error: err.message || translateAuthError("Invalid login credentials") });
       }
       return;
     }
 
     if (url.pathname === "/api/auth/signup" && req.method === "POST") {
+      if (!rateLimit(`auth:signup:${clientIp(req)}`, { limit: 5, windowMs: 10 * 60_000 }).allowed) {
+        throw new HttpError(429, "注册太频繁，请稍后再试");
+      }
       const body = await readBody(req);
       const email = (body.email || "").trim().toLowerCase();
       const password = body.password || "";
@@ -1025,6 +1152,10 @@ const server = createServer(async (req, res) => {
 
     // ===== 匿名行为事件采集（公开；匿名可写，登录则带 user_id）=====
     if (url.pathname === "/api/events" && req.method === "POST") {
+      if (!rateLimit(`events:${clientIp(req)}`, { limit: 60 }).allowed) {
+        json(res, 429, { ok: false, saved: 0 });
+        return;
+      }
       const body = await readBody(req);
       const list = Array.isArray(body.events) ? body.events : (body && body.type ? [body] : []);
       if (!list.length) { json(res, 200, { ok: true, saved: 0 }); return; }
@@ -1060,10 +1191,13 @@ const server = createServer(async (req, res) => {
 
     // ===== Admin API =====
     if (url.pathname === "/api/admin/login" && req.method === "POST") {
+      if (!rateLimit(`admin:login:${clientIp(req)}`, { limit: 5, windowMs: 5 * 60_000 }).allowed) {
+        throw new HttpError(429, "尝试太频繁，请 5 分钟后再试");
+      }
       const body = await readBody(req);
       const pw = process.env.ADMIN_PASSWORD;
       if (!pw) { json(res, 503, { error: "ADMIN_PASSWORD 未配置" }); return; }
-      if (!body.password || body.password !== pw) { json(res, 401, { error: "密码错误" }); return; }
+      if (typeof body.password !== "string" || !safeEqual(body.password, pw)) { json(res, 401, { error: "密码错误" }); return; }
       const token = randomBytes(32).toString("hex");
       adminTokens.set(token, Date.now() + 24 * 60 * 60 * 1000);
       json(res, 200, { token });
@@ -1375,15 +1509,50 @@ const server = createServer(async (req, res) => {
 
     await serveStatic(req, res);
   } catch (error) {
-    console.error(error);
-    json(res, 500, { error: error.message || "Unknown error" });
+    // 明确的客户端错误（HttpError）按其状态码回文案；其它异常只回通用文案 + 请求号，细节留在服务端日志
+    if (error instanceof HttpError) {
+      if (!res.headersSent) json(res, error.status, { error: error.message, ...(error.extra || {}) });
+      else res.end();
+      return;
+    }
+    const requestId = randomBytes(4).toString("hex");
+    console.error(`[${requestId}] ${req.method} ${url.pathname} 未处理异常:`, error);
+    if (!res.headersSent) json(res, 500, { error: "服务器内部错误，请稍后重试", requestId });
+    else res.end();
   }
 });
 
+// 请求头/整体请求超时（SSE 是响应长、请求短，不受影响）
+server.headersTimeout = 65_000;
+server.requestTimeout = 120_000;
+
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`QDII Fund Compass running at http://localhost:${PORT}`);
+  console.log(`QDII Fund Compass v${APP_VERSION} running at http://localhost:${PORT}`);
   // 启动后自检：数据若早于"最近一个定时更新时刻"，后台补刷一次（不阻塞服务启动）
   catchUpRefreshOnBoot();
+});
+
+// ----- 进程级兜底：优雅退出 + 未捕获异常 -----
+let shuttingDown = false;
+function shutdown(signal, exitCode = 0) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[shutdown] 收到 ${signal}，停止接收新连接…`);
+  server.close(() => {
+    console.log("[shutdown] 在途请求已处理完毕，退出");
+    process.exit(exitCode);
+  });
+  // 兜底：SSE 长连接可能迟迟不结束，最多等 10s
+  setTimeout(() => process.exit(exitCode), 10_000).unref();
+}
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("unhandledRejection", (reason) => {
+  console.error("[unhandledRejection]", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[uncaughtException] 进程状态不可信，退出交给 PM2 重启:", err);
+  shutdown("uncaughtException", 1);
 });
 
 let bootRefreshing = false;
@@ -1401,7 +1570,7 @@ async function catchUpRefreshOnBoot() {
       return;
     }
     console.log("[启动自检] 数据已过期，开始后台补刷…");
-    const snapshot = await refreshFunds();
+    const snapshot = await runRefreshOnce();
     const withAi = await attachAiSummaries(snapshot.funds);
     rememberFundsSnapshot(withAi);
     fundsForHot = withAi;

@@ -179,11 +179,20 @@ function evalExpect(exp, resp) {
   return checks;
 }
 
+// v1.6 起 /api/chat 需要登录用户 + 自带百炼 Key：跑用例前把该用户的 access_token 放到 AGENT_TEST_TOKEN。
+// 拿 token：浏览器登录后 localStorage["qdii-compass-session"].access_token，或 POST /api/auth/signin。
+const TEST_TOKEN = process.env.AGENT_TEST_TOKEN || "";
+if (!TEST_TOKEN) {
+  console.error("缺少 AGENT_TEST_TOKEN：需要一个已在「模型设置」配好百炼 Key 的用户 access_token，否则聊天接口会返回 NO_AI_KEY。");
+  console.error("示例：AGENT_TEST_TOKEN=eyJ... npm run agent:test");
+  process.exit(2);
+}
+
 async function chat(message, sessionId) {
   const start = Date.now();
   const res = await fetch(`${BASE}/api/chat`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", authorization: `Bearer ${TEST_TOKEN}` },
     body: JSON.stringify({ message, sessionId }),
   });
   const data = await res.json();

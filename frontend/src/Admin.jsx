@@ -4,16 +4,31 @@ const TOKEN_KEY = "qdii_admin_token";
 const getToken = () => sessionStorage.getItem(TOKEN_KEY);
 const setToken = (t) => t ? sessionStorage.setItem(TOKEN_KEY, t) : sessionStorage.removeItem(TOKEN_KEY);
 
-function af(path, opts = {}) {
+// 后台请求：带 token、20s 超时、统一解析 JSON；非 2xx 抛错（message 取服务端 error），401 清 token
+async function af(path, opts = {}) {
   const token = getToken();
-  return fetch(path, {
-    ...opts,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(opts.headers || {}),
-    },
-  });
+  let res;
+  try {
+    res = await fetch(path, {
+      ...opts,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(opts.headers || {}),
+      },
+      signal: opts.signal || AbortSignal.timeout(20000),
+    });
+  } catch (err) {
+    throw new Error(err?.name === "TimeoutError" ? "请求超时，请稍后重试" : "网络异常，请稍后重试");
+  }
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) { setToken(null); throw new Error("登录已失效，请刷新页面重新登录"); }
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+function LoadError({ message }) {
+  return <div className="adm-empty" style={{ color: "#c0392b" }}>加载失败：{message}</div>;
 }
 
 function fmtDate(s) {
@@ -104,7 +119,9 @@ function TrendBlock({ title, total, totalLabel = "合计", data, color }) {
 
 function StatsTab() {
   const [stats, setStats] = useState(null);
-  useEffect(() => { af("/api/admin/stats").then(r => r.json()).then(setStats).catch(() => {}); }, []);
+  const [err, setErr] = useState("");
+  useEffect(() => { af("/api/admin/stats").then(setStats).catch(e => setErr(e.message)); }, []);
+  if (err) return <LoadError message={err} />;
   if (!stats) return <div className="adm-empty">加载中…</div>;
 
   const kpis = [
@@ -201,7 +218,9 @@ function StatsTab() {
 // ─── 用户 ─────────────────────────────────────────────────
 function UsersTab() {
   const [users, setUsers] = useState(null);
-  useEffect(() => { af("/api/admin/users").then(r => r.json()).then(d => setUsers(d.users)).catch(() => {}); }, []);
+  const [err, setErr] = useState("");
+  useEffect(() => { af("/api/admin/users").then(d => setUsers(d.users || [])).catch(e => setErr(e.message)); }, []);
+  if (err) return <LoadError message={err} />;
   if (!users) return <div className="adm-empty">加载中…</div>;
   return (
     <div className="adm-table-wrap">
@@ -229,13 +248,14 @@ function UsersTab() {
 // ─── 邀请码 ───────────────────────────────────────────────
 function InvitesTab() {
   const [invites, setInvites] = useState(null);
+  const [err, setErr] = useState("");
   const [count, setCount] = useState(1);
   const [note, setNote] = useState("");
   const [genLoading, setGenLoading] = useState(false);
   const [newCodes, setNewCodes] = useState([]);
 
   const load = useCallback(() => {
-    af("/api/admin/invites").then(r => r.json()).then(d => setInvites(d.invites)).catch(() => {});
+    af("/api/admin/invites").then(d => { setInvites(d.invites || []); setErr(""); }).catch(e => { setErr(e.message); setInvites([]); });
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -243,16 +263,16 @@ function InvitesTab() {
   async function generate() {
     setGenLoading(true); setNewCodes([]);
     try {
-      const r = await af("/api/admin/invites", { method: "POST", body: JSON.stringify({ count, note: note || null }) });
-      const d = await r.json();
-      if (r.ok) { setNewCodes(d.codes || []); setNote(""); load(); }
-    } finally { setGenLoading(false); }
+      const d = await af("/api/admin/invites", { method: "POST", body: JSON.stringify({ count, note: note || null }) });
+      setNewCodes(d.codes || []); setNote(""); setErr(""); load();
+    } catch (e) { setErr(e.message); }
+    finally { setGenLoading(false); }
   }
 
   async function del(code) {
     if (!confirm(`确认删除邀请码 ${code}？`)) return;
-    await af(`/api/admin/invites/${code}`, { method: "DELETE" });
-    load();
+    try { await af(`/api/admin/invites/${code}`, { method: "DELETE" }); load(); }
+    catch (e) { setErr(e.message); }
   }
 
   const unused = (invites || []).filter(i => i.status === "unused");
@@ -273,6 +293,8 @@ function InvitesTab() {
           {genLoading ? "生成中…" : "生成"}
         </button>
       </div>
+
+      {err && <p className="adm-form-err">{err}</p>}
 
       {/* 刚生成的码高亮展示 */}
       {newCodes.length > 0 && (
@@ -343,7 +365,7 @@ function ChatsTab() {
 
   // 加载有过对话的用户列表
   useEffect(() => {
-    af("/api/admin/users").then(r => r.json()).then(d => {
+    af("/api/admin/users").then(d => {
       const list = (d.users || []).filter(u => u.chatCount > 0).sort((a, b) => b.chatCount - a.chatCount);
       setUsers(list);
       if (list.length) setSelUser(list[0]);
@@ -357,7 +379,6 @@ function ChatsTab() {
     if (uid) params.set("userId", uid);
     if (issues) params.set("issues", "1");
     af(`/api/admin/chats?${params.toString()}`)
-      .then(r => r.json())
       .then(d => { setChats(d.chats || []); setHasMore(d.hasMore || false); })
       .catch(() => setChats([]));
   }, []);
@@ -470,7 +491,9 @@ function ChatsTab() {
 // ─── 行为 ─────────────────────────────────────────────────
 function BehaviorTab() {
   const [data, setData] = useState(null);
-  useEffect(() => { af("/api/admin/behavior").then(r => r.json()).then(setData).catch(() => {}); }, []);
+  const [err, setErr] = useState("");
+  useEffect(() => { af("/api/admin/behavior").then(setData).catch(e => setErr(e.message)); }, []);
+  if (err) return <LoadError message={err} />;
   if (!data) return <div className="adm-empty">加载中…</div>;
 
   const f = data.funnel || {};
@@ -597,7 +620,7 @@ export default function Admin() {
   useEffect(() => {
     if (!getToken()) { setChecking(false); return; }
     af("/api/admin/verify")
-      .then(r => { if (r.ok) setAuthed(true); })
+      .then(() => setAuthed(true))
       .catch(() => {})
       .finally(() => setChecking(false));
   }, []);

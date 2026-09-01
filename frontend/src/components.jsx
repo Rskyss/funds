@@ -3,7 +3,8 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import {
   QUICK_CHIPS,
 } from "./data.js";
-import { getToken, getSession, authedFetch } from "./auth.js";
+import { getToken, getSession, authedFetch, handleUnauthorized } from "./auth.js";
+import { api } from "./api.js";
 import { readDetailCache, writeDetailCache } from "./detailCache.js";
 // 清洗 AI 卡片点评：去掉模型可能带出来的「(42字)」字数标注与整句外包的引号
 function cleanAiSummary(s) {
@@ -18,88 +19,6 @@ function cleanAiSummary(s) {
     if (t === before) break;
   }
   return t;
-}
-
-// ============== Number count-up ==============
-function CountUp({ value, duration = 1100, decimals = 0, prefix = "", suffix = "" }) {
-  const ref = React.useRef(null);
-  React.useEffect(() => {
-    const start = Date.now();
-    const format = (v) => {
-      const disp = decimals > 0 ? v.toFixed(decimals) : Math.round(v).toLocaleString();
-      return `${prefix}${disp}${suffix}`;
-    };
-    if (ref.current) ref.current.textContent = format(0);
-    const id = setInterval(() => {
-      const elapsed = Date.now() - start;
-      const p = Math.min(1, elapsed / duration);
-      const eased = 1 - Math.pow(1 - p, 3);
-      const cur = value * eased;
-      if (ref.current) ref.current.textContent = format(cur);
-      if (p >= 1) clearInterval(id);
-    }, 16);
-    return () => clearInterval(id);
-  }, [value, duration, decimals, prefix, suffix]);
-
-  const initial = decimals > 0 ? (0).toFixed(decimals) : "0";
-  return <span className="num" ref={ref}>{prefix}{initial}{suffix}</span>;
-}
-
-// ============== Sparkline ==============
-function Sparkline({
-  data, width = 100, height = 28, stroke,
-  fill = false, fillStops = null, animate = true, glow = false,
-  thickness = 1.5, endpoint = false, gridLines = 0,
-}) {
-  if (!data || data.length < 2) return null;
-  const min = Math.min(...data);
-  const max = Math.max(...data);
-  const range = max - min || 1;
-  const pad = 2;
-  const step = (width - pad * 2) / (data.length - 1);
-
-  const pts = data.map((v, i) => [
-    pad + i * step,
-    pad + (height - pad * 2) * (1 - (v - min) / range),
-  ]);
-  const path = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p[0].toFixed(2)} ${p[1].toFixed(2)}`).join(" ");
-  const areaPath = `${path} L${pts[pts.length - 1][0].toFixed(2)} ${height - pad} L${pts[0][0].toFixed(2)} ${height - pad} Z`;
-  const last = pts[pts.length - 1];
-  const trend = data[data.length - 1] >= data[0] ? "up" : "down";
-  const strokeColor = stroke || (trend === "up" ? "var(--up)" : "var(--down)");
-
-  // unique grad id
-  const gid = useMemo(() => "g" + Math.random().toString(36).slice(2, 8), []);
-
-  return (
-    <svg className="spark-svg" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" width={width} height={height}>
-      <defs>
-        {fill && (
-          <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={strokeColor} stopOpacity={fillStops ? fillStops[0] : 0.22}/>
-            <stop offset="100%" stopColor={strokeColor} stopOpacity={fillStops ? fillStops[1] : 0}/>
-          </linearGradient>
-        )}
-      </defs>
-
-      {gridLines > 0 && Array.from({ length: gridLines }).map((_, i) => {
-        const y = pad + (height - pad * 2) * ((i + 1) / (gridLines + 1));
-        return <line key={i} className="grid-line" x1={pad} x2={width - pad} y1={y} y2={y}/>;
-      })}
-
-      {fill && (
-        <path d={areaPath} fill={`url(#${gid})`} className={`nav-area ${animate ? "draw-area" : ""}`}/>
-      )}
-      <path d={path} className={`nav-line ${trend} ${animate ? "draw-line" : ""}`} stroke={strokeColor} strokeWidth={thickness}/>
-
-      {endpoint && (
-        <g>
-          <circle className="endpoint-pulse" cx={last[0]} cy={last[1]} r={3} fill={strokeColor}/>
-          <circle className="endpoint" cx={last[0]} cy={last[1]} r={3} stroke={strokeColor}/>
-        </g>
-      )}
-    </svg>
-  );
 }
 
 // ============== Top bar ==============
@@ -328,6 +247,13 @@ const FundCard = React.memo(function FundCard({ fund, idx, isFav, onFav, onOpen,
       className={`fcard ${isNew ? "fcard--new" : ""} ${isOpen ? "fcard--active" : ""}`}
       style={{ animationDelay: `${Math.min(idx, 11) * 0.04}s` }}
       onClick={() => onOpen && onOpen(fund)}
+      role="button"
+      tabIndex={0}
+      aria-label={`查看 ${fund.name}（${fund.code}）详情`}
+      aria-expanded={!!isOpen}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen && onOpen(fund); }
+      }}
     >
       <header className="fcard__head">
         <div style={{ minWidth: 0, flex: 1 }}>
@@ -441,10 +367,11 @@ function adaptDetail(api, fund) {
     allocation,
     holdingsDate: api.holdingsReportDate || (allocRaw[0] && allocRaw[0].date) || "—",
     pro: {
+      // 缺数据用 null 表达，交给展示层显示「暂无」；不能用 0 顶替，0 会被当成真实数值
       aumDate: fund.aumDate || "—",
-      maxDrawdown: typeof api.maxDrawdown1y === "number" ? api.maxDrawdown1y : (fund.drawdown || 0),
-      sharpe: fund.sharpe || 0,
-      volatility: typeof fund.volatility1y === "number" ? fund.volatility1y : 0,
+      maxDrawdown: typeof api.maxDrawdown1y === "number" ? api.maxDrawdown1y : (fund.hasDrawdown ? fund.drawdown : null),
+      sharpe: fund.hasSharpe ? fund.sharpe : null,
+      volatility: typeof fund.volatility1y === "number" ? fund.volatility1y : null,
       navUnit: lastNav,
       navDate: an.realtime?.navDate || fund.date || "—",
     },
@@ -523,9 +450,9 @@ function buildPreviewDetail(fund) {
     holdingsDate: "—",
     pro: {
       aumDate: fund.aumDate || "—",
-      maxDrawdown: fund.hasDrawdown ? fund.drawdown : 0,
-      sharpe: fund.hasSharpe ? fund.sharpe : 0,
-      volatility: typeof fund.volatility1y === "number" ? fund.volatility1y : 0,
+      maxDrawdown: fund.hasDrawdown ? fund.drawdown : null,
+      sharpe: fund.hasSharpe ? fund.sharpe : null,
+      volatility: typeof fund.volatility1y === "number" ? fund.volatility1y : null,
       navUnit: typeof fund.nav === "number" ? fund.nav : 0,
       navDate: fund.date || "—",
     },
@@ -559,11 +486,11 @@ function ManagerPanel({ managerId, onClose, onOpenFund }) {
     if (!managerId) return;
     let alive = true;
     setData(null); setErr(null);
-    fetch(`/api/manager/${managerId}`)
-      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+    const ctrl = new AbortController();
+    api(`/api/manager/${managerId}`, { signal: ctrl.signal, timeout: 20000 })
       .then((d) => { if (alive) setData(d); })
       .catch((e) => { if (alive) setErr(e.message); });
-    return () => { alive = false; };
+    return () => { alive = false; ctrl.abort(); };
   }, [managerId]);
   if (!managerId) return null;
   const bio = data?.bioStructured || {};
@@ -692,12 +619,13 @@ function FundDrawer({ fund, onClose, isFav, onFav, chatOpen, onOpenFund, onOpenC
     setDetail(cached ? adaptDetail(cached, renderFund) : buildPreviewDetail(renderFund));
     setDRefreshing(!cached);
 
-    fetch(`/api/fund/${renderFund.code}`)
-      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-      .then((api) => {
-        if (!alive) return;
-        writeDetailCache(renderFund.code, api);
-        setDetail(adaptDetail(api, renderFund));
+    // 切换基金时取消上一只的请求，不再只靠 alive 位丢弃结果
+    const ctrl = new AbortController();
+    api(`/api/fund/${renderFund.code}`, { signal: ctrl.signal, timeout: 30000 })
+      .then((payload) => {
+        if (!alive || !payload) return;
+        writeDetailCache(renderFund.code, payload);
+        setDetail(adaptDetail(payload, renderFund));
         setDRefreshing(false);
       })
       .catch((e) => {
@@ -705,7 +633,7 @@ function FundDrawer({ fund, onClose, isFav, onFav, chatOpen, onOpenFund, onOpenC
         setDError(e.message);
         setDRefreshing(false);
       });
-    return () => { alive = false; };
+    return () => { alive = false; ctrl.abort(); };
   }, [renderFund]);
 
   if (!renderFund) return null;
@@ -790,10 +718,14 @@ function FundDrawer({ fund, onClose, isFav, onFav, chatOpen, onOpenFund, onOpenC
           {/* 专业指标 */}
           <section className="dsection">
             <div className="pro-grid">
-              <ProCell label="基金规模（元）" hint={`规模截止 ${d.pro.aumDate}`} value={`${renderFund.aum.toFixed(1)} 亿`}/>
-              <ProCell label="最大回撤" hint="历史从高点到低点的最大幅度（近 1 年）" value={`${d.pro.maxDrawdown.toFixed(2)}%`} cls="down"/>
-              <ProCell label="夏普比率" hint="每承担一份风险获得多少超额收益，>1 优秀（近 1 年）" value={d.pro.sharpe.toFixed(2)} cls={d.pro.sharpe > 1 ? "up" : ""}/>
-              <ProCell label="年化波动率" hint="价格波动剧烈程度，越小越平稳（近 1 年）" value={`${d.pro.volatility.toFixed(2)}%`}/>
+              <ProCell label="基金规模（元）" hint={renderFund.hasAum ? `规模截止 ${d.pro.aumDate}` : "数据源暂未提供该基金规模，或本次未抓到"}
+                value={renderFund.hasAum ? `${renderFund.aum.toFixed(1)} 亿` : "暂无"} cls={renderFund.hasAum ? "" : "na"}/>
+              <ProCell label="最大回撤" hint="历史从高点到低点的最大幅度（近 1 年）"
+                value={d.pro.maxDrawdown == null ? "暂无" : `${d.pro.maxDrawdown.toFixed(2)}%`} cls={d.pro.maxDrawdown == null ? "na" : "down"}/>
+              <ProCell label="夏普比率" hint="每承担一份风险获得多少超额收益，>1 优秀（近 1 年）"
+                value={d.pro.sharpe == null ? "暂无" : d.pro.sharpe.toFixed(2)} cls={d.pro.sharpe == null ? "na" : (d.pro.sharpe > 1 ? "up" : "")}/>
+              <ProCell label="年化波动率" hint="价格波动剧烈程度，越小越平稳（近 1 年）"
+                value={d.pro.volatility == null ? "暂无" : `${d.pro.volatility.toFixed(2)}%`} cls={d.pro.volatility == null ? "na" : ""}/>
             </div>
           </section>
 
@@ -869,7 +801,7 @@ function FundDrawer({ fund, onClose, isFav, onFav, chatOpen, onOpenFund, onOpenC
                         onClick={async () => {
                           setRegenErr(""); setRegenBusy(true);
                           try {
-                            const r = await authedFetch(`/api/fund/${fund.code}/ai-summary/preview`, { method: "POST", body: JSON.stringify({ long: true }) });
+                            const r = await authedFetch(`/api/fund/${renderFund.code}/ai-summary/preview`, { method: "POST", body: JSON.stringify({ long: true }) });
                             const dd = await r.json();
                             if (!r.ok) throw new Error(dd.error || "生成失败");
                             setAiOverride({ summary: dd.summary, detail: dd.detail });
@@ -1621,8 +1553,11 @@ function AIDrawer({ open, onClose, onOpenFund, openFundCode, fundDrawerOpen, log
   const [busy, setBusy] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
   const [sessions, setSessions] = useState([]);
-  const sessionRef = useRef(localStorage.getItem(CHAT_SESSION_KEY) || null);
+  const sessionRef = useRef((() => { try { return localStorage.getItem(CHAT_SESSION_KEY) || null; } catch { return null; } })());
   const scrollRef = useRef(null);
+  // 当前进行中的流式请求；组件卸载时中止，避免卸载后继续 setState
+  const streamAbortRef = useRef(null);
+  useEffect(() => () => { streamAbortRef.current?.abort(); }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -1642,10 +1577,11 @@ function AIDrawer({ open, onClose, onOpenFund, openFundCode, fundDrawerOpen, log
 
   useEffect(() => {
     if (!open || suggestions.length) return;
-    fetch("/api/chat/suggestions")
-      .then((r) => r.json())
-      .then((d) => setSuggestions(buildSuggestions(d, 18)))
+    let alive = true;
+    api("/api/chat/suggestions")
+      .then((d) => { if (alive && d) setSuggestions(buildSuggestions(d, 18)); })
       .catch(() => {});
+    return () => { alive = false; };
   }, [open]);
 
   useEffect(() => {
@@ -1654,24 +1590,23 @@ function AIDrawer({ open, onClose, onOpenFund, openFundCode, fundDrawerOpen, log
 
   function setSessionId(id) {
     sessionRef.current = id;
-    if (id) localStorage.setItem(CHAT_SESSION_KEY, id);
+    try {
+      if (id) localStorage.setItem(CHAT_SESSION_KEY, id);
+      else localStorage.removeItem(CHAT_SESSION_KEY);
+    } catch { /* 隐私模式等场景忽略 */ }
   }
 
   async function loadSessions() {
     if (!getSession()) { setSessions([]); return; }
     try {
-      const r = await fetch("/api/chat/sessions", { headers: getToken() ? { authorization: `Bearer ${getToken()}` } : {} });
-      const d = await r.json();
-      setSessions(Array.isArray(d.sessions) ? d.sessions : []);
+      const d = await api("/api/chat/sessions", { auth: true });
+      setSessions(Array.isArray(d?.sessions) ? d.sessions : []);
     } catch { setSessions([]); }
   }
 
   async function openSession(sid) {
     try {
-      const r = await fetch(`/api/chat/history?sessionId=${encodeURIComponent(sid)}`, {
-        headers: getToken() ? { authorization: `Bearer ${getToken()}` } : {},
-      });
-      const d = await r.json();
+      const d = await api(`/api/chat/history?sessionId=${encodeURIComponent(sid)}`, { auth: true });
       const msgs = (d.messages || []).map((m) => ({
         role: m.role === "user" ? "user" : "assistant",
         content: m.content || "",
@@ -1720,13 +1655,24 @@ function AIDrawer({ open, onClose, onOpenFund, openFundCode, fundDrawerOpen, log
     let finalReply = "";
     let done = false;
 
+    streamAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    streamAbortRef.current = ctrl;
+
     try {
       const res = await fetch("/api/chat?stream=1", {
         method: "POST",
         headers: chatHeaders(),
         body: JSON.stringify({ message: txt, sessionId: sessionRef.current }),
+        signal: ctrl.signal,
       });
-      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+      if (res.status === 401) { handleUnauthorized(); throw new Error("登录已过期，请重新登录"); }
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try { const d = await res.json(); if (d?.error) msg = d.error; } catch { /* ignore */ }
+        throw new Error(msg);
+      }
+      if (!res.body) throw new Error("当前浏览器不支持流式响应");
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -1763,9 +1709,16 @@ function AIDrawer({ open, onClose, onOpenFund, openFundCode, fundDrawerOpen, log
         patchLast({ content: finalReply || acc || "（无回复）", cards, sources, streaming: false });
       }
     } catch (err) {
-      patchLast({ content: `出错了：${err.message}`, error: true, streaming: false });
+      if (ctrl.signal.aborted) return; // 组件已卸载或被新请求替代，不再更新 UI
+      // 断线/出错时保留已经流出来的内容，只在末尾标注中断原因，而不是整段替换成报错
+      const reason = err?.name === "AbortError" ? "网络连接中断" : (err?.message || "服务端错误");
+      patchLast((prev) => ({
+        content: prev.content ? `${prev.content}\n\n⚠️ 回答中断：${reason}` : `出错了：${reason}`,
+        cards, sources, error: true, streaming: false,
+      }));
     } finally {
-      setBusy(false);
+      if (streamAbortRef.current === ctrl) streamAbortRef.current = null;
+      if (!ctrl.signal.aborted) setBusy(false);
     }
   }
 

@@ -1,13 +1,17 @@
 {
   "name": "qdii-fund-compass",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20.6"
+  },
   "scripts": {
     "start": "node --env-file=.env server.mjs",
     "dev": "node scripts/dev.mjs",
     "build": "vite build",
     "preview": "npm run build && npm start",
+    "test": "node --test tests/*.test.mjs",
     "ai:generate": "node --env-file=.env scripts/generate-summaries.mjs",
     "ai:detail": "node --env-file=.env scripts/generate-detail-summary.mjs",
     "data:f10": "node --env-file=.env scripts/backfill-fund-details.mjs",

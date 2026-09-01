@@ -178,11 +178,11 @@ sequenceDiagram
 
 | 层级 | 文件 | 模型/依赖 | 做什么 |
 |------|------|-----------|--------|
-| **规划层** | `lib/agent/planner.mjs` | `DASHSCOPE_MODEL_FAST`（默认 qwen-turbo） | 听懂用户 → 输出 JSON 计划：`intent` / `filter` / `codes` / `conceptQuery` / `eventQuery` / `needF10` |
+| **规划层** | `lib/agent/planner.mjs` | 用户 BYOK 模型（`creds.model`）；平台侧脚本走 `DASHSCOPE_CHAT_MODELS` 模型链 | 听懂用户 → 输出 JSON 计划：`intent` / `filter` / `codes` / `conceptQuery` / `eventQuery` / `needF10` |
 | **策略卡片** | `rules/*.md` + `lib/agent/rules.mjs` | — | 合规、筛选政策、对比/概念/事件话术；由 `prompts.mjs` 拼装进规划层/合成层 system |
 | **工具层** | `lib/agent/tools.mjs` | Supabase、可选 Tavily、embedding | 按计划查库、RAG、联网；返回结构化结果给合成层 |
 | **主题映射** | `lib/agent/thematic.mjs` | — | 「存储/半导体」等行业词 → 主题 + RAG 查询（找基场景） |
-| **合成层** | `lib/agent/synth.mjs` | `DASHSCOPE_MODEL_STRONG`（默认 qwen-max） | 只根据工具结果写回答；流式 `delta` |
+| **合成层** | `lib/agent/synth.mjs` | 与规划层同一模型（BYOK 单模型；平台侧走同一条模型链顺位降级） | 只根据工具结果写回答；流式 `delta` / `thinking` |
 | **会话** | `lib/agent/session.mjs` | `chat_sessions` 表 | 多轮上下文、`lastCodes` / `lastFilters` |
 | **观测** | `lib/agent/metrics.mjs` | `chat_logs` 表 | 限流、每轮 intent/耗时/降级标记 |
 
@@ -250,6 +250,6 @@ sequenceDiagram
 |-------------|------|
 | `rules/` 仅草稿、未接入 | **已接入** `prompts.mjs` |
 | 仅 `filter` 结构化检索 | 增加 **行业主题 RAG**、`event` 时也会带候选基金 |
-| 会话只写 Supabase | **localStorage 优先** + 登录用户 `chat_sessions` / `history` API |
+| 会话只写 Supabase | 服务端每轮仍读写 `chat_sessions`（重启不丢）；前端 localStorage 只缓存最近对话用于秒开，并通过 `history` API 回退 |
 | 无历史列表 API | 已有 `GET /api/chat/sessions` |
 | 合成层非流式 | 默认 **SSE 流式** `delta` |

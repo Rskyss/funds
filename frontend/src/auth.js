@@ -27,11 +27,13 @@ function loadSession() {
   }
 }
 
+// 隐私模式 / 存储满 / 被禁用时 localStorage 会抛错；登录态退化为“仅本次页面有效”，不能让登录流程崩掉
 function saveSession(value) {
-  if (value) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
-  } else {
-    localStorage.removeItem(STORAGE_KEY);
+  try {
+    if (value) localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
+    else localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    /* ignore */
   }
 }
 
@@ -49,44 +51,74 @@ export function getSession() {
   return session;
 }
 
+/** 服务端返回 401 或本地判断 token 已过期时统一走这里：清登录态并广播 */
+export function handleUnauthorized() {
+  if (!session) return;
+  session = null;
+  saveSession(null);
+  emit();
+}
+
+function isExpired(s) {
+  const exp = Number(s?.expires_at);
+  return Number.isFinite(exp) && exp > 0 && exp * 1000 < Date.now();
+}
+
 export function getToken() {
-  return session?.access_token || null;
+  if (!session?.access_token) return null;
+  if (isExpired(session)) {
+    handleUnauthorized();
+    return null;
+  }
+  return session.access_token;
 }
 
 export async function init() {
-  const res = await fetch("/api/config");
-  const config = await res.json();
-  if (!config.url || !config.publishableKey) {
-    console.warn("Supabase 未配置，认证功能不可用");
-    return null;
-  }
-  supabase = createClient(config.url, config.publishableKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+  // 先恢复本地登录态，再拉配置：配置接口偶发失败不应让已登录用户“看起来没登录”
   session = loadSession();
+  if (session && isExpired(session)) session = null;
   emit();
+  try {
+    const res = await fetch("/api/config", { signal: AbortSignal.timeout(10000) });
+    const config = await res.json();
+    if (!config.url || !config.publishableKey) {
+      console.warn("Supabase 未配置，认证功能不可用");
+      return null;
+    }
+    supabase = createClient(config.url, config.publishableKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+  } catch (err) {
+    console.warn("读取 /api/config 失败：", err?.message || err);
+  }
   return supabase;
+}
+
+async function postJson(url, payload) {
+  let res;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(20000),
+    });
+  } catch {
+    throw new Error("网络异常或超时，请稍后重试");
+  }
+  const data = await res.json().catch(() => ({}));
+  return { res, data };
 }
 
 export async function signUp(email, password) {
   const normalizedEmail = (email || "").trim().toLowerCase();
-  const res = await fetch("/api/auth/signup", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email: normalizedEmail, password }),
-  });
-  const data = await res.json();
+  const { res, data } = await postJson("/api/auth/signup", { email: normalizedEmail, password });
   if (!res.ok) throw new Error(translateAuthError(data.error) || "注册失败");
   return await signIn(normalizedEmail, password);
 }
 
 export async function signIn(email, password) {
-  const res = await fetch("/api/auth/signin", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
-  const data = await res.json();
+  const { res, data } = await postJson("/api/auth/signin", { email, password });
   if (!res.ok) throw new Error(translateAuthError(data.error) || "登录失败");
   if (!data.session) throw new Error("登录失败：未返回会话");
   session = data.session;
@@ -101,16 +133,18 @@ export async function signOut() {
   emit();
 }
 
+/** 带登录态的 fetch（返回原始 Response，供需要自行处理状态码的调用方使用）；默认 20s 超时 */
 export async function authedFetch(url, options = {}) {
   const headers = new Headers(options.headers || {});
   const token = getToken();
   if (token) headers.set("authorization", `Bearer ${token}`);
   if (options.body && !headers.has("content-type")) headers.set("content-type", "application/json");
-  const res = await fetch(url, { ...options, headers });
-  if (res.status === 401) {
-    session = null;
-    saveSession(null);
-    emit();
+  let res;
+  try {
+    res = await fetch(url, { ...options, headers, signal: options.signal || AbortSignal.timeout(20000) });
+  } catch (err) {
+    throw new Error(err?.name === "TimeoutError" ? "请求超时，请检查网络后重试" : "网络异常，请稍后重试");
   }
+  if (res.status === 401) handleUnauthorized();
   return res;
 }

@@ -7,16 +7,21 @@ import "./compass.css";
 class ErrorBoundary extends React.Component {
   state = { error: null };
   static getDerivedStateFromError(e) { return { error: e }; }
+  componentDidCatch(error, info) {
+    // 堆栈只进控制台，不渲染给终端用户（避免暴露源码路径）
+    console.error("[ErrorBoundary]", error, info?.componentStack);
+  }
   render() {
     if (this.state.error) {
       return (
-        <div style={{ padding: "40px", fontFamily: "monospace", color: "#c0392b" }}>
-          <h2>页面崩溃</h2>
-          <pre style={{ whiteSpace: "pre-wrap", fontSize: "13px" }}>
-            {this.state.error?.message}{"\n\n"}{this.state.error?.stack}
-          </pre>
+        <div style={{ padding: "40px", fontFamily: "system-ui, sans-serif", color: "#c0392b" }}>
+          <h2>页面出了点问题</h2>
+          <p style={{ fontSize: "14px", color: "#555" }}>{this.state.error?.message || "未知错误"}</p>
           <button onClick={() => this.setState({ error: null })} style={{ marginTop: "16px", padding: "8px 16px", cursor: "pointer" }}>
             重试
+          </button>
+          <button onClick={() => window.location.reload()} style={{ marginTop: "16px", marginLeft: "8px", padding: "8px 16px", cursor: "pointer" }}>
+            刷新页面
           </button>
         </div>
       );

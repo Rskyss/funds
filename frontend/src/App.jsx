@@ -15,6 +15,7 @@ import { QUICK_CHIPS } from "./data.js";
 import AuthModal from "./AuthModal.jsx";
 import AiSettingsModal from "./AiSettingsModal.jsx";
 import { init as initAuth, onAuthChange, signOut, getSession, authedFetch } from "./auth.js";
+import { api } from "./api.js";
 import { readFundsCache, writeFundsCache } from "./fundsCache.js";
 import { track, trackPageViewOnce, trackSearch } from "./track.js";
 
@@ -88,7 +89,7 @@ function App() {
   const [aiConfigured, setAiConfigured] = useState(false);
 
   useEffect(() => {
-    initAuth();
+    initAuth().catch(() => {});
     const off = onAuthChange((s) => setSession(s));
     return off;
   }, []);
@@ -96,17 +97,19 @@ function App() {
   useEffect(() => {
     if (!session) { setFavs(new Set()); setFavOnly(false); return; }
     let alive = true;
-    authedFetch("/api/favorites")
-      .then((r) => (r.ok ? r.json() : { favorites: [] }))
-      .then((d) => { if (alive) setFavs(new Set(d.favorites || [])); })
+    api("/api/favorites", { auth: true })
+      .then((d) => { if (alive) setFavs(new Set(d?.favorites || [])); })
       .catch(() => {});
     return () => { alive = false; };
   }, [session]);
 
   useEffect(() => {
     if (!session) { setAiConfigured(false); return; }
-    authedFetch("/api/profile").then((r) => r.json())
-      .then((d) => setAiConfigured(!!d?.profile?.aiConfigured)).catch(() => setAiConfigured(false));
+    let alive = true;
+    api("/api/profile", { auth: true })
+      .then((d) => { if (alive) setAiConfigured(!!d?.profile?.aiConfigured); })
+      .catch(() => { if (alive) setAiConfigured(false); });
+    return () => { alive = false; };
   }, [session]);
   const [openFund, setOpenFund] = useState(null);
   const [chatOpen, setChatOpen] = useState(false);
@@ -131,10 +134,10 @@ function App() {
     const cached = readFundsCache();
     if (cached) applyPayload(cached);
 
-    fetch("/api/funds")
-      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+    // 空库首访会触发服务端全量抓取（可能要几分钟），超时给足
+    api("/api/funds", { timeout: 120000 })
       .then((data) => {
-        if (!alive) return;
+        if (!alive || !data) return;
         writeFundsCache(data);
         applyPayload(data);
       })
@@ -221,39 +224,41 @@ function App() {
     setThemeSel((s) => (s === th ? null : th));
   }, []);
 
-  // filter funds
-  let funds = allFunds;
-  if (q.trim()) {
-    const k = q.trim().toLowerCase();
-    funds = funds.filter((f) =>
-      `${f.code} ${f.name} ${f.theme} ${f.region} ${f.manager}`.toLowerCase().includes(k)
-    );
-  }
-  if (activeChips.size) {
-    const chips = QUICK_CHIPS.filter((c) => activeChips.has(c.id));
-    const matchChip = (chip, f) =>
-      (chip.region  ? f.region === chip.region   : true) &&
-      (chip.theme   ? f.theme === chip.theme     : true) &&
-      (chip.role    ? f.role === chip.role       : true) &&
-      (chip.rating  ? f.rating === chip.rating   : true) &&
-      (chip.status  ? f.status === chip.status   : true) &&
-      (chip.keyword ? f.name.includes(chip.keyword) : true);
-    // 主题类标签之间取并集，条件类标签逐个取交集
-    const unionChips = chips.filter((c) => c.kind === "union");
-    const andChips = chips.filter((c) => c.kind === "and");
-    if (unionChips.length) funds = funds.filter((f) => unionChips.some((c) => matchChip(c, f)));
-    for (const c of andChips) funds = funds.filter((f) => matchChip(c, f));
-  }
-  if (themeSel) funds = funds.filter((f) => f.theme === themeSel);
-  if (favOnly) funds = funds.filter((f) => favs.has(f.code));
-  funds = [...funds].sort((a, b) => {
-    let diff = 0;
-    if (sort === "return1y") diff = a.return1y - b.return1y;
-    else if (sort === "sharpe") diff = a.sharpe - b.sharpe;
-    else if (sort === "rating") diff = a.rating - b.rating;
-    else if (sort === "aum") diff = a.aum - b.aum;
-    return sortDir === "asc" ? diff : -diff;
-  });
+  // 筛选 + 排序：700+ 只基金，只在相关输入变化时重算（之前每次 render 都全量 filter/sort，输入框每敲一个字就卡一下）
+  const funds = useMemo(() => {
+    let list = allFunds;
+    if (q.trim()) {
+      const k = q.trim().toLowerCase();
+      list = list.filter((f) =>
+        `${f.code} ${f.name} ${f.theme} ${f.region} ${f.manager}`.toLowerCase().includes(k)
+      );
+    }
+    if (activeChips.size) {
+      const chips = QUICK_CHIPS.filter((c) => activeChips.has(c.id));
+      const matchChip = (chip, f) =>
+        (chip.region  ? f.region === chip.region   : true) &&
+        (chip.theme   ? f.theme === chip.theme     : true) &&
+        (chip.role    ? f.role === chip.role       : true) &&
+        (chip.rating  ? f.rating === chip.rating   : true) &&
+        (chip.status  ? f.status === chip.status   : true) &&
+        (chip.keyword ? f.name.includes(chip.keyword) : true);
+      // 主题类标签之间取并集，条件类标签逐个取交集
+      const unionChips = chips.filter((c) => c.kind === "union");
+      const andChips = chips.filter((c) => c.kind === "and");
+      if (unionChips.length) list = list.filter((f) => unionChips.some((c) => matchChip(c, f)));
+      for (const c of andChips) list = list.filter((f) => matchChip(c, f));
+    }
+    if (themeSel) list = list.filter((f) => f.theme === themeSel);
+    if (favOnly) list = list.filter((f) => favs.has(f.code));
+    return [...list].sort((a, b) => {
+      let diff = 0;
+      if (sort === "return1y") diff = a.return1y - b.return1y;
+      else if (sort === "sharpe") diff = a.sharpe - b.sharpe;
+      else if (sort === "rating") diff = a.rating - b.rating;
+      else if (sort === "aum") diff = a.aum - b.aum;
+      return sortDir === "asc" ? diff : -diff;
+    });
+  }, [allFunds, q, activeChips, themeSel, favOnly, favs, sort, sortDir]);
 
   return (
     <>

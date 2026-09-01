@@ -13,3 +13,6 @@ yt-scribe-clone/
 
 # 含密钥的 .env 备份，禁止提交
 .env.bak.*
+
+# 浏览器自动化测试产物
+.playwright-mcp/

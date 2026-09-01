@@ -1,6 +1,6 @@
 # QDII 基金罗盘
 
-**当前版本：1.6.0** · [更新记录](CHANGELOG.md)
+**当前版本：1.7.1** · [更新记录](CHANGELOG.md)
 
 本地运行的 QDII 基金查询、筛选、对比与 AI 问答 Web 应用。前端为 **Vite + React**（源码在 `frontend/`），后端为 Node.js HTTP 服务；数据持久化在 Supabase Postgres，基金数据主要来自东方财富 / 天天基金公开页面，AI 能力通过阿里云百炼 DashScope（OpenAI 兼容接口）调用。
 
@@ -14,7 +14,7 @@
 
 - QDII 基金列表、收益、评分、费率、限购状态展示；列表迷你净值曲线、板块风向筛选、只看自选、排序升/降
 - 基金详情、净值历史、持仓、费率、同类对比；列表一句话 AI 点评 + 详情抽屉长点评（250–350 字）
-- 收藏、自选与登录态管理（邀请码注册；登录走服务端 `/api/auth/signin`，错误提示中文化）
+- 收藏、自选与登录态管理（邮箱密码开放注册；登录走服务端 `/api/auth/signin`，错误提示中文化；登录/注册有限流）
 - AI 基金短点评 / 详情长点评批量生成（`npm run ai:generate`、`npm run ai:detail`）
 - 聊天式 Agent：筛选、比较、概念解释、事件问答、持仓关键词检索；开场 **2 条 🔥 热议 + 4 条固定推荐**；流式思考过程可折叠查看
 - **用户自带百炼 Key（BYOK）**：每个登录用户在「模型设置」里填自己的 API Key + 投问模型 + 短/长评模型（先验证 Key 再展开模型）；聊天投问用各自的 Key，未配置则禁用并引导；详情可「用我的模型重新生成点评」（临时、不落库）；Key 经 AES-256-GCM 加密存储、不回显
@@ -39,7 +39,7 @@ outputs/            # 生成的报告（Git 忽略）
 
 ## 环境要求
 
-- 推荐 Node.js 20+（使用原生 `fetch` 与 `node --env-file`）
+- Node.js **≥ 20.6**（`node --env-file`、`AbortSignal.any` 需要；`package.json` 已声明 `engines`）
 - 已配置好表结构与 RPC 的 Supabase 项目（见下方 [Fork 后首次部署](#fork-后首次部署)）
 
 ## 配置说明：两套 Key 与最低要求
@@ -90,7 +90,7 @@ ADMIN_PASSWORD=         # 留空：/admin 后台不可用
 | 基金列表 / 筛选 / 排序 / 详情 | | | | 公开接口，首次访问空库会自动抓东方财富 |
 | 板块风向、收益、夏普、持仓等 | | | | |
 | 看库里已有的共享短长评 | | | | 依赖之前跑过 `npm run ai:generate` 或已有数据 |
-| 登录 / 自选收藏 | ✓ | | | 注册需邀请码（`npm run invite:gen`） |
+| 登录 / 自选收藏 | ✓ | | | 开放注册（邀请码仅后台统计留用） |
 | AI 投顾对话 | ✓ | ✓ | | 规划与回答走用户 Key |
 | 详情「用我的模型重新生成点评」 | ✓ | ✓ | | 临时生成，不落库 |
 | 语义向量检索（聊天增强） | ✓ | ✓ | ✓ | 缺平台 Key 时静默降级，对话仍可用 |
@@ -126,20 +126,17 @@ npm start
 
 ## Fork 后首次部署
 
-从 [GitHub 仓库](https://github.com/Rskyss/funds) 下载源码后，除 `.env` 外还需准备 **Supabase 数据库**。仓库内**没有**一份「一键建全库」的 SQL，需自行建表或参考 `docs/qdii-supabase接入/DESIGN_qdii-supabase接入.md` 中的表结构说明。
+从 [GitHub 仓库](https://github.com/Rskyss/funds) 下载源码后，除 `.env` 外还需准备 **Supabase 数据库**。数据库结构的完整定义在 [`supabase/migrations/`](supabase/README.md)，按文件名顺序重放即可建出与线上一致的库（含向量检索、热议推荐、埋点等全部表与函数）。
 
 **建议顺序：**
 
 1. 创建 Supabase 项目，拿到 URL 与两个 Key
-2. 建核心表：`funds`、`nav_history`、`fund_details`、`fund_ai_summary`、`favorites`、`user_profile`、`invite_codes` 等（字段见 `docs/qdii-supabase接入/DESIGN_qdii-supabase接入.md`）
-3. **v1.6 必做**：`user_profile` 增加 `ai_api_key_cipher`、`ai_chat_model`、`ai_review_model`（见 [CHANGELOG · v1.6](CHANGELOG.md#160---2026-06-25)）
-4. **向量检索（可选）**：执行 `docs/ai-热议推荐/migration.sql` 中的 `fund_doc_chunks` 与 `search_fund_doc_chunks` RPC
-5. **热议推荐（可选）**：同上的 `chat_hot_suggestions` 表
-6. 配置 `.env` → `npm run build` → `npm start`
-7. 打开首页，空库会自动抓取基金数据；生成邀请码：`npm run invite:gen`
-8. （可选）配 `DASHSCOPE_API_KEY` 后跑 `npm run ai:generate`、`npm run data:embed` 填充短长评与向量
+2. 建库：`supabase link` + `supabase db push`，或到控制台 SQL Editor 按顺序执行 `supabase/migrations/*.sql`（见 `supabase/README.md`）
+3. 配置 `.env` → `npm run build` → `npm start`
+4. 打开首页，空库会自动抓取基金数据（要几分钟）；`GET /api/health` 可看数据更新时间与数据库连通性
+5. （可选）配 `DASHSCOPE_API_KEY` 后跑 `npm run ai:generate`、`npm run data:embed` 填充短长评与向量
 
-**不配置平台 Key 也能完成 1–7**，得到可用的基金浏览器 + BYOK 版 AI 投顾；短长评需用户自己生成或后续补跑脚本。
+**不配置平台 Key 也能完成 1–4**，得到可用的基金浏览器 + BYOK 版 AI 投顾；短长评需用户自己生成或后续补跑脚本。
 
 ## 本地开发
 
@@ -158,7 +155,7 @@ npm start
 npm run dev
 ```
 
-同时启动后端（默认 `8787`）与 Vite（`5173`），`/api` 由 Vite 代理。若本机有系统 HTTP 代理导致 dev 页面空白，请改用上面的 `build + start`。
+同时启动后端（默认 `8787`）与 Vite（默认 `5174`，可用 `FRONTEND_PORT` 覆盖），`/api` 由 Vite 代理。若本机有系统 HTTP 代理导致 dev 页面空白，请改用上面的 `build + start`。
 
 改 `.env` 后需重启服务；改 `frontend/` 后需重新 `npm run build`（或使用 `npm run dev`）。
 
@@ -168,8 +165,9 @@ npm run dev
 npm run build           # 构建前端到 public/
 npm run dev             # Vite 开发模式（双进程）
 npm run preview         # 构建后启动服务
+npm test                # 单元测试（不需要 .env）
 
-npm run data:refresh    # 定时刷新基金数据
+npm run data:refresh    # 触发全量刷新（需 .env 里的 DATA_REFRESH_TOKEN，或在服务器本机直连）
 npm run data:spark      # 回填列表迷你净值曲线（spark_json）
 npm run data:f10        # 回填 F10 基金详情
 npm run data:metrics    # 回填风险收益指标
@@ -179,7 +177,7 @@ npm run data:fees       # 回填费率与申购状态
 npm run data:embed      # 生成文档向量
 npm run ai:generate     # 批量生成 AI 基金短点评（列表卡片）
 npm run ai:detail       # 批量生成 AI 详情长点评（抽屉）
-npm run agent:test      # 运行 Agent 脚本用例（v1.6 起需登录用户已配置 Key，或自行改脚本带 Token）
+npm run agent:test      # 运行 Agent 脚本用例（需 AGENT_TEST_TOKEN=<已配 Key 用户的 access_token>）
 npm run invite:gen      # 生成邀请码
 npm run auth:reset-password  # 管理员重置用户密码（需 SUPABASE_SECRET_KEY）
 ```
@@ -200,15 +198,23 @@ npm run auth:reset-password -- user@example.com 新密码至少6位
 
 ## 生产部署（简要）
 
+线上实例的服务器目录**不是 git 仓库**，靠 rsync 同步文件：
+
 ```bash
 npm run build
-# 同步代码与 public/ 到服务器，配置 .env 后：
-PORT=3002 npm start   # 或使用 PM2：pm2 start npm --name funds -- start
+rsync -az server.mjs package.json CHANGELOG.md CLAUDE.md <server>:/www/wwwroot/funds/
+rsync -az --delete lib/ <server>:/www/wwwroot/funds/lib/
+rsync -az --delete scripts/ <server>:/www/wwwroot/funds/scripts/
+rsync -az --delete public/ <server>:/www/wwwroot/funds/public/
+ssh <server> "cd /www/wwwroot/funds && pm2 restart funds && sleep 2 && curl -s 127.0.0.1:3002/api/health"
 ```
 
-Nginx 将站点根目录指向 `public/`，`/api` 与页面请求反代到 Node 进程（默认监听 `127.0.0.1:PORT`）。静态 `.js`/`.css` 需能从 `public/assets/` 正确加载。
+- 服务器 `.env` 独立维护（`PORT=3002`），任何同步都不要覆盖它
+- Nginx 把站点反代到 `127.0.0.1:3002`（页面与 `/api` 都由 Node 服务托管，静态资源在 `public/assets/`）
+- 每日数据刷新由服务器 crontab 调 `scripts/scheduled-refresh.mjs`（07:00，带 flock）；服务器 `.env` 配了 `DATA_REFRESH_TOKEN` 后脚本自动带上
+- 探活：`GET /api/health` 返回 `ok / version / dataUpdatedAt / db`
 
-> **从 1.5 升级到 1.6**：先在 Supabase 给 `user_profile` 增三列（见 CHANGELOG v1.6），再在服务器 `.env` 补 `AI_KEY_SECRET`（上线后不可更改），然后 `npm run build` → 同步 `public/` 与后端 → `pm2 restart funds`。
+> **从 1.7.0 升级到 1.7.1**：见 [CHANGELOG · 1.7.1 升级步骤](CHANGELOG.md#171---2026-09-01)——数据库执行 `supabase/migrations/20260901031850_*.sql`（线上已执行）、`.env` 补 `DATA_REFRESH_TOKEN`、同步文件、`pm2 restart funds`。
 
 ## 数据说明
 

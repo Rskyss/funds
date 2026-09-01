@@ -3,6 +3,7 @@
 import { spawn } from "node:child_process";
 
 const BACKEND_PORT = process.env.BACKEND_PORT || "8787";
+const FRONTEND_PORT = process.env.FRONTEND_PORT || "5174";
 
 const procs = [];
 
@@ -30,6 +31,6 @@ process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
 run("backend", "node", ["--env-file=.env", "server.mjs"], { PORT: BACKEND_PORT });
-run("vite", "npx", ["vite"], { BACKEND_PORT });
+run("vite", "npx", ["vite"], { BACKEND_PORT, FRONTEND_PORT });
 
-console.log(`[dev] 后端 http://127.0.0.1:${BACKEND_PORT} · 前端 http://localhost:5173`);
+console.log(`[dev] 后端 http://127.0.0.1:${BACKEND_PORT} · 前端 http://localhost:${FRONTEND_PORT}`);
