@@ -70,3 +70,34 @@ test("完全没有收益数据的基金不打分：score/label 为空，不占�
   assert.equal(peers.find((f) => f.code === "c").peerCount, 3);
   assert.equal(peers.find((f) => f.code === "c").peerRank, 1);
 });
+
+test("净值停更的基金不打分：label 为「净值停更」，不占同类名次（018336 三年到期清盘、东财仍列着）", () => {
+  const stale = { code: "018336", theme: "港股", date: "2026-07-20", return6m: -6, return1y: -10, return3y: null, return3m: -6, ageYears: 3.1, risk: "高", discountFee: null };
+  const peers = [
+    { code: "a", theme: "港股", date: "2026-09-01", return6m: -5, return1y: -10, return3y: null },
+    { code: "b", theme: "港股", date: "2026-09-01", return6m: 2, return1y: 4, return3y: null },
+    { code: "c", theme: "港股", date: "2026-08-31", return6m: 8, return1y: 12, return3y: null },
+    stale,
+  ];
+  applyPercentileScores(peers);
+  const s = peers.find((f) => f.code === "018336");
+  assert.equal(s.navStaleDays, 43);
+  assert.equal(s.score, null);
+  assert.equal(s.label, "净值停更");
+  assert.equal(s.peerRank, null);
+  assert.equal(s.peerCount, null);
+  assert.equal(peers.find((f) => f.code === "c").peerCount, 3);
+  assert.equal(peers.find((f) => f.code === "a").peerRank, 3);
+  // 没停更的基金 navStaleDays 为 null，且"数据不足"标签不受影响
+  assert.equal(peers.find((f) => f.code === "a").navStaleDays, null);
+});
+
+test("既停更又没有收益数据的基金，标签以「净值停更」优先", () => {
+  const peers = [
+    { code: "a", theme: "港股", date: "2026-09-01", return6m: 1, return1y: 2, return3y: null },
+    { code: "z", theme: "港股", date: "2026-07-01", return6m: null, return1y: null, return3y: null },
+  ];
+  applyPercentileScores(peers);
+  assert.equal(peers[1].label, "净值停更");
+  assert.equal(peers[1].score, null);
+});

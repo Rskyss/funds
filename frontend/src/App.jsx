@@ -18,6 +18,7 @@ import { init as initAuth, onAuthChange, signOut, getSession, authedFetch } from
 import { api } from "./api.js";
 import { readFundsCache, writeFundsCache } from "./fundsCache.js";
 import { track, trackPageViewOnce, trackSearch } from "./track.js";
+import { sortFundList } from "./sortFunds.js";
 
 const ACCENT = "#3480F4";
 
@@ -253,14 +254,7 @@ function App() {
     }
     if (themeSel) list = list.filter((f) => f.theme === themeSel);
     if (favOnly) list = list.filter((f) => favs.has(f.code));
-    return [...list].sort((a, b) => {
-      let diff = 0;
-      if (sort === "return1y") diff = a.return1y - b.return1y;
-      else if (sort === "sharpe") diff = a.sharpe - b.sharpe;
-      else if (sort === "rating") diff = a.rating - b.rating;
-      else if (sort === "aum") diff = a.aum - b.aum;
-      return sortDir === "asc" ? diff : -diff;
-    });
+    return sortFundList(list, sort, sortDir); // 停更 / 数据不足的基金任何排序都沉底
   }, [allFunds, q, activeChips, themeSel, favOnly, favs, sort, sortDir]);
 
   return (

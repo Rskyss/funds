@@ -1,4 +1,4 @@
-const FUNDS_CACHE_KEY = "qdii-funds-cache-v2";
+const FUNDS_CACHE_KEY = "qdii-funds-cache-v3";
 const FUNDS_CACHE_TTL_MS = 7 * 24 * 3600 * 1000;
 
 export function readFundsCache() {

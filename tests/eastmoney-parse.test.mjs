@@ -29,6 +29,15 @@ test("parseFundRow：字段数不足（接口漂移）返回 null，而不是错
   assert.equal(parseFundRow(null), null);
 });
 
+test("parseFundRow：净值日期为空时净值也当缺失（与读写两侧「无日期净值当缺失」同一规则）", () => {
+  const noDate = [...FIELDS]; noDate[3] = "";
+  const fund = parseFundRow(noDate.join(","));
+  assert.ok(fund);
+  assert.equal(fund.date, "");
+  assert.equal(fund.nav, null);
+  assert.equal(fund.accumNav, null);
+});
+
 test("parseFundRow：基金代码不是 6 位数字返回 null", () => {
   const bad = ["ABC123", ...FIELDS.slice(1)];
   assert.equal(parseFundRow(bad.join(",")), null);

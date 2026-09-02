@@ -893,6 +893,7 @@ input, select { font: inherit; color: inherit; }
 .tag--theme  { background: #F5F0FF; color: #6037B8; }
 .tag--role   { background: var(--surface-tint); color: var(--ink-3); }
 .tag--risk-high { background: #FDECEA; color: #B5301B; }
+.tag--stale     { background: #FDECEA; color: #B5301B; font-weight: 600; } /* 净值停更 N 天 */
 .tag--risk-mid  { background: #FFF6E5; color: #95620A; }
 .tag--status-open  { background: var(--down-soft); color: var(--down); position: relative; padding-left: 14px; }
 .tag--status-open::before {
@@ -1244,6 +1245,15 @@ input, select { font: inherit; color: inherit; }
 .drawer-rating__meta { color: var(--muted); }
 
 /* 净值走势标题旁的单位净值 */
+.nav-stale-note {
+  margin: 0 0 10px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #FDECEA;
+  color: #B5301B;
+  font-size: 12px;
+  line-height: 1.5;
+}
 .nav-unit-inline {
   display: inline-flex;
   align-items: baseline;

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概览
 
-QDII 基金罗盘：本地运行的 QDII 基金查询/筛选/对比/AI 点评/聊天 Agent 的 Web 应用。当前版本 **1.7.3**（1.6 引入 BYOK 用户自带百炼 Key；1.7 筛选多选/同类内评分；1.7.1 安全加固与工程补全；1.7.3 线上体检修复：东财接口连通、无数据不评分、持仓 30 天缓存、数据库瞬时错误重试、数据完整性告警）：
+QDII 基金罗盘：本地运行的 QDII 基金查询/筛选/对比/AI 点评/聊天 Agent 的 Web 应用。当前版本 **1.7.4**（1.6 引入 BYOK 用户自带百炼 Key；1.7 筛选多选/同类内评分；1.7.1 安全加固与工程补全；1.7.3 线上体检修复：东财接口连通、无数据不评分、持仓 30 天缓存、数据库瞬时错误重试、数据完整性告警；1.7.4 净值停更基金标注与沉底、无日期净值当缺失）：
 
 - 前端：Vite + React 18，源码在 `frontend/`，`npm run build` 产出到 `public/`
 - 后端：Node 原生 HTTP 服务（`server.mjs`），无框架
@@ -89,7 +89,7 @@ npm run auth:reset-password              # 重置某用户密码（reset-user-pa
         ↓
 Node http server (server.mjs)
    ├─ lib/auth.mjs          — 用 admin client 校验 Bearer，解出 userId
-   ├─ lib/store.mjs         — Supabase 表读写 + DB↔JS 字段映射
+   ├─ lib/store.mjs         — Supabase 表读写（字段映射在 `lib/fundRow.mjs`，纯函数可单测；无日期的净值读写两侧都当缺失）
    ├─ lib/eastmoney.mjs     — 抓东方财富、解析、分类、评分、结构化分析
    ├─ lib/ai.mjs            — DashScope 调用（OpenAI 兼容端点 + 重试 + 多模型路由）
    ├─ lib/embedding.mjs     — 文档向量化（fund 文档检索）
@@ -123,12 +123,12 @@ Supabase Postgres + Auth
 
 所有表都开了 RLS：基金类表（`funds` / `nav_history` / `fund_details` / `fund_ai_summary` / `chat_hot_suggestions`）公开只读；`favorites` 仅本人；`user_profile` / `chat_sessions` / `chat_logs` / `fund_doc_chunks` / `events` / `invite_codes` 对浏览器侧**无任何策略也无表权限**，只有服务端 service role 能读写（1.7.1 收口——之前四张表的 `*_admin_all` 策略是对公网全开的）。结构定义在 `supabase/migrations/`。
 
-**字段命名规则**：DB `snake_case`（`fund_type`, `nav_date`, `return_1y`），JS `camelCase`（`fundType`, `date`, `return1y`）。所有转换集中在 `lib/store.mjs` 的 `fundToRow` / `rowToFund`。新增字段必须 `supabase/migrations/` 新文件（并以同名应用到线上）、mapper、调用点三处同步。
+**字段命名规则**：DB `snake_case`（`fund_type`, `nav_date`, `return_1y`），JS `camelCase`（`fundType`, `date`, `return1y`）。所有转换集中在 `lib/fundRow.mjs` 的 `fundToRow` / `rowToFund`（1.7.4 从 `store.mjs` 抽出，纯函数可单测）。新增字段必须 `supabase/migrations/` 新文件（并以同名应用到线上）、mapper、调用点三处同步。
 
 ### 关键模块约束
 
 - `lib/eastmoney.mjs` 解析东方财富私有格式：基金排行接口（完整收益数据）+ 基金代码库（兜底，让没上排行的 QDII 也出现）。排行接口用 `vm.runInNewContext` 解 `var rankData = {...}`；要换数据源先看 `parseRankData` 和 `fetchQdiiUniverse`。所有 fetch 走 `lib/fetchTimeout.mjs`；抓取失败一律**抛错**（不再返回空值，否则脚本会把空结果连同 `*_fetched_at` 一起落库、之后永久跳过）；`parseFundRow` 字段数不足返回 null，整批解析失败中止刷新。
-- `classifyFund(name)` 是纯字符串关键词规则，给基金打 `region/theme/fundType/role/risk` 五标签，改了要重刷数据才会重算落库。评分为**同主题内**百分位（`applyPercentileScores` 按 `theme` 分组，附 `peerRank`/`peerCount`；不足 6 只标"同类样本少"），服务读库时实时重算，改公式重启即生效、无需重刷数据；纯函数单测在 `tests/score.test.mjs`（`node --test tests/*.test.mjs`）。
+- `classifyFund(name)` 是纯字符串关键词规则，给基金打 `region/theme/fundType/role/risk` 五标签，改了要重刷数据才会重算落库。评分为**同主题内**百分位（`applyPercentileScores` 按 `theme` 分组，附 `peerRank`/`peerCount`；不足 6 只标"同类样本少"；净值日期比全站最新落后 14 天以上的基金由 `lib/dataQuality.mjs markStaleNav` 标 `navStaleDays`，不打分、标"净值停更"、列表沉底、AI 筛选剔除，读取时现算不落库），服务读库时实时重算，改公式重启即生效、无需重刷数据；纯函数单测在 `tests/score.test.mjs`（`node --test tests/*.test.mjs`）。
 - `buildStructuredAnalysis` 输出结构化分析对象给详情抽屉用，**不走 AI**；AI 点评（一句话）由 `lib/ai.mjs` 生成、单独存 `fund_ai_summary` 表。
 - `loadOrRefresh` 是兜底加载：DB 没数据时自动抓一次；用户主动刷新需要 `?refresh=1`。
 - `lib/dataSchedule.mjs` 在服务启动时自检：数据早于最近 `DATA_UPDATE_TIME` 批次会后台补刷。所有全量刷新都经 `server.mjs` 的 `runRefreshOnce()` 单飞（并发触发共用一个 Promise）。线上每日 07:00 由服务器 root crontab 调 `scripts/scheduled-refresh.mjs`（带 flock），日志在 `/www/wwwroot/funds/logs/data-refresh.log`。

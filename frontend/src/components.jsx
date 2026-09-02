@@ -280,6 +280,9 @@ const FundCard = React.memo(function FundCard({ fund, idx, isFav, onFav, onOpen,
         <span className="tag tag--role">{fund.role}</span>
         <span className={`tag ${riskClass}`}>{fund.risk}风险</span>
         <span className={`fcard__status ${statusInfo.cls}`}>{statusInfo.text}</span>
+        {fund.navStaleDays > 0 && (
+          <span className="tag tag--stale" title={`净值日期 ${fund.date || "—"}，可能已清盘或暂停运作`}>净值停更 {fund.navStaleDays} 天</span>
+        )}
       </div>
 
       {Array.isArray(fund.altShares) && fund.altShares.length > 0 && (
@@ -744,6 +747,9 @@ function FundDrawer({ fund, onClose, isFav, onFav, chatOpen, onOpenFund, onOpenC
                 <span className="drawer-rating__meta">{renderFund.rating ? `晨星 · ${renderFund.rating} 星` : "暂无评级"}</span>
               </div>
             </div>
+            {renderFund.navStaleDays > 0 && (
+              <p className="nav-stale-note">净值日期 {renderFund.date || d.pro.navDate} · 已停更 {renderFund.navStaleDays} 天，可能已清盘或暂停运作，以下收益与评分均为旧数据</p>
+            )}
             <div className="nav-chart-slot">
               <NavChartBig data={d.navHist} trend={trend} loading={d.navHist.length < 2} animate={false}/>
             </div>
@@ -1400,6 +1406,7 @@ function normalizeCard(c) {
     score: c.score ?? "--",
     peerRank: c.peerRank ?? null,
     peerCount: c.peerCount ?? null,
+    navStaleDays: c.navStaleDays ?? null,
   };
 }
 
@@ -1984,8 +1991,8 @@ function EmbedFundCard({ f, onOpen, isOpen }) {
           <strong className={`mono ${f.returnYtd >= 0 ? "up" : "down"}`}>{f.returnYtd >= 0 ? "+" : ""}{Number(f.returnYtd).toFixed(2)}%</strong>
         </div>
         <div className="ai-fcard__cell">
-          <span>{f.peerRank && f.peerCount ? "同类排名" : "观察分"}</span>
-          <strong className="mono">{f.peerRank && f.peerCount ? `${f.peerRank}/${f.peerCount}` : (f.score ?? "—")}</strong>
+          <span>{f.navStaleDays ? "净值停更" : f.peerRank && f.peerCount ? "同类排名" : "观察分"}</span>
+          <strong className={`mono ${f.navStaleDays ? "down" : ""}`}>{f.navStaleDays ? `${f.navStaleDays} 天` : f.peerRank && f.peerCount ? `${f.peerRank}/${f.peerCount}` : (f.score ?? "—")}</strong>
         </div>
       </div>
     </div>
