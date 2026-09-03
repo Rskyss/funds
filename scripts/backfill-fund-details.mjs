@@ -1,11 +1,12 @@
-// 批量回填 fund_details（F10：投资目标 / 投资范围 / 业绩比较基准）。
+// 批量回填 fund_details（F10：投资目标 / 投资范围 / 业绩比较基准 / 基金管理人）。
 // 用法：
 //   npm run data:f10
 //   FORCE=1 npm run data:f10                       重抓所有
 //   F10_CONCURRENCY=4 F10_DELAY_MS=300 npm run data:f10
 
 import { fetchFundDetail } from "../lib/eastmoney.mjs";
-import { getAllFunds, getFundDetail, saveFundDetail } from "../lib/store.mjs";
+import { getAllFunds, getFundDetail, saveFundDetail, listFundCompanies } from "../lib/store.mjs";
+import { loadCompanyTable, companiesMissingSite } from "../lib/purchaseGuide.mjs";
 
 const CONCURRENCY = Number(process.env.F10_CONCURRENCY || 6);
 const DELAY_MS = Number(process.env.F10_DELAY_MS || 200);
@@ -18,7 +19,8 @@ async function sleep(ms) {
 async function processOne(code) {
   if (!FORCE) {
     const existing = await getFundDetail(code).catch(() => null);
-    if (existing && (existing.goal || existing.scope || existing.benchmark)) {
+    // 已有 F10 文案且已有基金公司（购买引导用）才跳过；老数据缺公司字段时普通跑一次就能补上
+    if (existing && (existing.goal || existing.scope || existing.benchmark) && existing.company_id) {
       return { code, status: "skip" };
     }
   }
@@ -64,5 +66,14 @@ async function runPool(items, worker) {
   const stats = await runPool(funds, (f) => processOne(f.code));
   console.log(`完成。用时 ${((Date.now() - start) / 1000).toFixed(1)}s`);
   console.log(`汇总：ok=${stats.ok} skip=${stats.skip || 0} empty=${stats.empty || 0} fail=${stats.fail || 0}`);
+  // 购买引导：哪些基金公司还没有官网对照（lib/data/fund-companies.json），提醒补表
+  try {
+    const rows = await listFundCompanies();
+    const noCompany = rows.filter((r) => !r.company_id).length;
+    const missing = companiesMissingSite(rows, loadCompanyTable());
+    console.log(`基金公司：${rows.length - noCompany}/${rows.length} 只已识别；无官网对照的公司 ${missing.length} 家${missing.length ? "：" + missing.map((c) => `${c.id} ${c.name || "?"}（${c.funds} 只）`).join("、") : ""}`);
+  } catch (err) {
+    console.warn(`官网对照核对失败: ${err.message}`);
+  }
   process.exit(stats.fail > funds.length * 0.3 ? 1 : 0);
 })();

@@ -1569,6 +1569,34 @@ input, select { font: inherit; color: inherit; }
 .trade-strip__cell strong.stop { color: #C5281B; }
 .trade-strip__cell strong.muted { color: var(--muted); font-weight: 500; }
 
+/* 去哪里买（购买引导）：只给渠道入口，不做销售动作 */
+.buy-guide {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--surface-soft);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.buy-guide__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; }
+.buy-guide__title { font-size: 13px; font-weight: 600; color: var(--ink-2); white-space: nowrap; }
+.buy-guide__note { font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
+.buy-guide__note.is-stop { color: #C5281B; }
+.buy-guide__links { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.buy-guide__btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 7px 12px; border-radius: 8px;
+  border: 1px solid var(--accent-edge); background: var(--accent-soft); color: var(--accent);
+  font-size: 13px; font-weight: 600; text-decoration: none; white-space: nowrap;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.buy-guide__btn:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+.buy-guide__btn.is-disabled {
+  pointer-events: none; cursor: default;
+  background: var(--surface-tint); color: var(--muted); border-color: var(--border-soft);
+}
+.buy-guide__hint, .buy-guide__disclaimer { font-size: 11.5px; color: var(--muted); line-height: 1.5; margin: 0; }
+
 /* fees */
 .fee-block { margin-top: 10px; }
 .fee-tabs {

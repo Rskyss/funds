@@ -505,12 +505,13 @@ function BehaviorTab() {
     { label: "用了 AI 投顾", value: f.askedAI || 0, color: "#22c55e" },
   ];
   const fMax = Math.max(1, ...funnelSteps.map(s => s.value));
-  const hasAny = (tt.page_view || 0) + (tt.fund_open || 0) + (tt.search || 0) + (tt.filter || 0) > 0;
+  const hasAny = (tt.page_view || 0) + (tt.fund_open || 0) + (tt.search || 0) + (tt.filter || 0) + (tt.buy_click || 0) > 0;
   const kpis = [
     { label: "页面浏览", value: tt.page_view || 0, color: "#3480F4" },
     { label: "打开基金详情", value: tt.fund_open || 0, color: "#0ea5e9" },
     { label: "搜索次数", value: tt.search || 0, color: "#8b5cf6" },
     { label: "筛选点击", value: tt.filter || 0, color: "#f59e0b" },
+    { label: "点击购买渠道", value: tt.buy_click || 0, color: "#ef4444" },
   ];
 
   return (

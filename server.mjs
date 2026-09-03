@@ -69,6 +69,7 @@ import { getActiveHotSuggestions, maybeRefreshHotSuggestions } from "./lib/agent
 import { formatDataUpdateDisplay, scheduledUpdateBefore } from "./lib/dataSchedule.mjs";
 import { mergeShareClassCards } from "./lib/agent/shareClass.mjs";
 import { fillMissingForAll } from "./lib/mergeMetrics.mjs";
+import { buildPurchaseGuide } from "./lib/purchaseGuide.mjs";
 
 // 读取登录用户的聊天凭证（apiKey + 投问模型）；未配置/解密失败返回 null。
 async function loadChatCreds(userId) {
@@ -438,7 +439,7 @@ async function loadFundDetailWithHistory(code, allFundsCache) {
     };
     fetchFundDetail(code)
       .then((row) => saveFundDetail(row))
-      .catch(() => {});
+      .catch((err) => console.warn(`[detail] F10 概况抓取/落库失败 ${code}: ${err.message}`)); // 静默会让迁移没上线之类的问题永远发现不了
   }
 
   const fund = funds.find((item) => item.code === code);
@@ -512,12 +513,22 @@ async function loadFundDetailWithHistory(code, allFundsCache) {
       .catch(() => {});
   }
 
+  // 购买引导（去哪里买）：申购状态来自列表快照，基金公司来自 fund_details；纯内存计算，不额外查库
+  const purchaseGuide = buildPurchaseGuide({
+    code,
+    purchaseStatus: fund?.purchaseStatus ?? null,
+    purchaseLimitYuan: fund?.purchaseLimitYuan ?? null,
+    companyId: detailRow?.company_id ?? null,
+    companyName: detailRow?.company_name ?? null,
+  });
+
   return {
     ...detail,
     managers,
     navHistory,
     analysis,
     maxDrawdown1y,
+    purchaseGuide,
     holdings: holdingsResult.holdings,
     holdingsReportDate: holdingsResult.reportDate,
     assetAllocation,
@@ -1191,7 +1202,7 @@ const server = createServer(async (req, res) => {
       if (!list.length) { json(res, 200, { ok: true, saved: 0 }); return; }
       let userId = null;
       try { const u = await verifyToken(req.headers["authorization"]); userId = u?.userId || null; } catch {}
-      const ALLOWED = new Set(["page_view", "fund_open", "search", "filter"]);
+      const ALLOWED = new Set(["page_view", "fund_open", "search", "filter", "buy_click"]);
       const clip = (s, n) => (typeof s === "string" ? s.slice(0, n) : null);
       const rows = list.slice(0, 50)
         .filter((e) => e && ALLOWED.has(e.type))
@@ -1384,7 +1395,7 @@ const server = createServer(async (req, res) => {
       for (let i = 13; i >= 0; i--) days.push(dayKey(now - i * DAY));
       const emptyDayMap = () => Object.fromEntries(days.map((d) => [d, 0]));
 
-      const typeTotals = { page_view: 0, fund_open: 0, search: 0, filter: 0 };
+      const typeTotals = { page_view: 0, fund_open: 0, search: 0, filter: 0, buy_click: 0 };
       const visitorsByDay = Object.fromEntries(days.map((d) => [d, new Set()]));
       const openByDay = emptyDayMap();
       const searchByDay = emptyDayMap();

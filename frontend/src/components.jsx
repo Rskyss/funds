@@ -6,6 +6,7 @@ import {
 import { getToken, getSession, authedFetch, handleUnauthorized } from "./auth.js";
 import { api } from "./api.js";
 import { readDetailCache, writeDetailCache } from "./detailCache.js";
+import { track } from "./track.js";
 // 清洗 AI 卡片点评：去掉模型可能带出来的「(42字)」字数标注与整句外包的引号
 function cleanAiSummary(s) {
   if (!s) return s;
@@ -390,6 +391,7 @@ function adaptDetail(api, fund) {
       redeemFees: (api.redeemFees || []).map((r) => ({ period: r.period, rate: r.rate })),
     },
     aiSummary: api.aiSummary || "暂无 AI 点评。",
+    purchaseGuide: api.purchaseGuide || null,
     aiDetail: api.aiDetail || null,
     aiSummaryAt: api.aiSummaryAt || null,
     aiDetailAt: api.aiDetailAt || null,
@@ -471,6 +473,7 @@ function buildPreviewDetail(fund) {
       redeemFees: [],
     },
     aiSummary: "正在加载 AI 点评…",
+    purchaseGuide: null,
     aiDetail: null,
     aiSummaryAt: null,
     aiDetailAt: null,
@@ -852,6 +855,35 @@ function FundDrawer({ fund, onClose, isFav, onFav, chatOpen, onOpenFund, onOpenC
                 <strong className="mono muted">{d.trading.statusDate}</strong>
               </div>
             </div>
+
+            {/* 去哪里买：本站不销售基金，只给渠道入口；暂停/封闭时按钮置灰 */}
+            {d.purchaseGuide && (
+              <div className="buy-guide">
+                <div className="buy-guide__head">
+                  <span className="buy-guide__title">去哪里买</span>
+                  <span className={`buy-guide__note${d.purchaseGuide.canBuy ? "" : " is-stop"}`}>{d.purchaseGuide.note}</span>
+                </div>
+                <div className="buy-guide__links">
+                  {d.purchaseGuide.channels.map((c) => (d.purchaseGuide.canBuy
+                    ? (
+                      <a
+                        key={c.key}
+                        className="buy-guide__btn"
+                        href={c.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={() => track("buy_click", { code: renderFund.code, label: c.key })}
+                      >
+                        {c.label} ↗
+                      </a>
+                    )
+                    : <span key={c.key} className="buy-guide__btn is-disabled" aria-disabled="true">{c.label}</span>
+                  ))}
+                  {d.purchaseGuide.officialHint && <span className="buy-guide__hint">{d.purchaseGuide.officialHint}</span>}
+                </div>
+                <p className="buy-guide__disclaimer">{d.purchaseGuide.disclaimer}</p>
+              </div>
+            )}
 
             <div className="fee-block">
               <div className="fee-tabs">

@@ -70,3 +70,29 @@ test("资产配置表缺失或表头缺「报告期」时返回空数组", () =>
   assert.deepEqual(parseAssetAllocationHtml("<html><p>无</p></html>"), []);
   assert.deepEqual(parseAssetAllocationHtml(tableWith(["日期", "股票"], [["2026-06-30", "1"]])), []);
 });
+
+import { parseFundCompany } from "../lib/eastmoney.mjs";
+
+test("parseFundCompany：从概况页「基金管理人」解析东财公司 id 与名称", () => {
+  const html = `<tr><th>基金管理人</th><td><a href="//fund.eastmoney.com/company/80055334.html">华泰柏瑞基金</a></td><th>基金托管人</th><td><a href="//fund.eastmoney.com/bank/80001068.html">建设银行</a></td></tr>`;
+  assert.deepEqual(parseFundCompany(html), { id: "80055334", name: "华泰柏瑞基金" });
+});
+
+test("parseFundCompany：http 绝对链接、标签间换行空白、名称前后空格都能解析", () => {
+  const html = `<th>基金管理人</th>\n  <td class="x">\n   <a target="_blank" href="http://fund.eastmoney.com/company/80000229.html"> 易方达基金 </a>\n  </td>`;
+  assert.deepEqual(parseFundCompany(html), { id: "80000229", name: "易方达基金" });
+});
+
+test("parseFundCompany：只有名称没有公司链接时给名称不猜 id；完全没有基金管理人时返回 null", () => {
+  assert.deepEqual(parseFundCompany(`<th>基金管理人</th><td>华泰柏瑞基金</td>`), { id: null, name: "华泰柏瑞基金" });
+  assert.equal(parseFundCompany("<html><p>无</p></html>"), null);
+  assert.equal(parseFundCompany(""), null);
+  assert.equal(parseFundCompany(null), null);
+});
+
+test("parseFundCompany：单元格异常超长（超过 300 字符）视为格式漂移返回 null；链接内嵌套标签时退化为只给名称", () => {
+  const huge = `<th>基金管理人</th><td>${"x".repeat(400)}<a href="//fund.eastmoney.com/company/80055334.html">华泰柏瑞基金</a></td>`;
+  assert.equal(parseFundCompany(huge), null);
+  const nested = `<th>基金管理人</th><td><a href="//fund.eastmoney.com/company/80055334.html"><span>华泰柏瑞基金</span></a></td>`;
+  assert.deepEqual(parseFundCompany(nested), { id: null, name: "华泰柏瑞基金" });
+});

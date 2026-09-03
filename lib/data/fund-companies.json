@@ -1,0 +1,199 @@
+{
+  "verifiedAt": "2026-09-03",
+  "note": "QDII 基金公司官网对照（东财公司 id → 官网首页）。逐家搜索 + 程序核实 HTTP 200 且页面含公司名；只放 https。新公司：npm run data:f10 结尾会列出缺对照的，补进来后重启服务。",
+  "companies": {
+    "80000220": {
+      "name": "南方基金",
+      "site": "https://www.nffund.com/"
+    },
+    "80000221": {
+      "name": "富国基金",
+      "site": "https://www.fullgoal.com.cn/"
+    },
+    "80000222": {
+      "name": "华夏基金",
+      "site": "https://www.chinaamc.com/"
+    },
+    "80000223": {
+      "name": "嘉实基金",
+      "site": "https://www.jsfund.cn/"
+    },
+    "80000224": {
+      "name": "国泰基金",
+      "site": "https://www.gtfund.com/"
+    },
+    "80000225": {
+      "name": "大成基金",
+      "site": "https://www.dcfund.com.cn/"
+    },
+    "80000226": {
+      "name": "博时基金",
+      "site": "https://www.bosera.com/"
+    },
+    "80000227": {
+      "name": "长盛基金",
+      "site": "https://www.csfunds.com.cn/"
+    },
+    "80000228": {
+      "name": "华安基金",
+      "site": "https://www.huaan.com.cn/"
+    },
+    "80000229": {
+      "name": "易方达基金",
+      "site": "https://www.efunds.com.cn/"
+    },
+    "80000230": {
+      "name": "鹏华基金",
+      "site": "https://www.phfund.com.cn/"
+    },
+    "80000231": {
+      "name": "融通基金",
+      "site": "https://www.rtfund.com/"
+    },
+    "80000233": {
+      "name": "国投瑞银基金",
+      "site": "https://www.ubssdic.com/"
+    },
+    "80000235": {
+      "name": "银华基金",
+      "site": "https://www.yhfund.com.cn/"
+    },
+    "80000236": {
+      "name": "宝盈基金",
+      "site": null,
+      "note": "官网仅支持 http://www.byfunds.com/（2026-09-03 本机与服务器核实 443 端口均不通），按规则不下发 http 链接"
+    },
+    "80000238": {
+      "name": "宏利基金",
+      "site": "https://www.manulifefund.com.cn/"
+    },
+    "80000239": {
+      "name": "长城基金",
+      "site": "https://www.ccfund.com.cn/"
+    },
+    "80000240": {
+      "name": "万家基金",
+      "site": "https://www.wjasset.com/"
+    },
+    "80000243": {
+      "name": "长信基金",
+      "site": "https://www.cxfund.com.cn/"
+    },
+    "80000246": {
+      "name": "海富通基金",
+      "site": "https://www.hftfund.com/"
+    },
+    "80000248": {
+      "name": "广发基金",
+      "site": "https://www.gffunds.com.cn/"
+    },
+    "80000250": {
+      "name": "华宝基金",
+      "site": "https://www.fsfund.com/"
+    },
+    "80000251": {
+      "name": "景顺长城基金",
+      "site": "https://www.igwfmc.com/"
+    },
+    "80036782": {
+      "name": "招商基金",
+      "site": "https://www.cmfchina.com/"
+    },
+    "80041198": {
+      "name": "天弘基金",
+      "site": "https://www.thfund.com.cn/"
+    },
+    "80044515": {
+      "name": "国海富兰克林基金",
+      "site": "https://www.ftsfund.com/"
+    },
+    "80045188": {
+      "name": "申万菱信基金",
+      "site": "https://www.swsmu.com/"
+    },
+    "80048088": {
+      "name": "光大保德信基金",
+      "site": "https://www.epf.com.cn/"
+    },
+    "80048752": {
+      "name": "中银基金",
+      "site": "https://www.bocim.com/"
+    },
+    "80049689": {
+      "name": "诺安基金",
+      "site": "https://www.lionfund.com.cn/"
+    },
+    "80050229": {
+      "name": "摩根基金(中国)",
+      "site": "https://www.cifm.com/"
+    },
+    "80053708": {
+      "name": "汇添富基金",
+      "site": "https://www.99fund.com/"
+    },
+    "80055334": {
+      "name": "华泰柏瑞基金",
+      "site": "https://www.huatai-pb.com/"
+    },
+    "80064225": {
+      "name": "工银瑞信基金",
+      "site": "https://www.icbcubs.com.cn/"
+    },
+    "80064562": {
+      "name": "交银施罗德基金",
+      "site": "https://www.fund001.com/"
+    },
+    "80065113": {
+      "name": "中欧基金",
+      "site": "https://www.zofund.com/"
+    },
+    "80065990": {
+      "name": "建信基金",
+      "site": "https://www.ccbfund.cn/"
+    },
+    "80066470": {
+      "name": "中信保诚基金",
+      "site": "https://www.citicprufunds.com.cn/"
+    },
+    "80067635": {
+      "name": "汇丰晋信基金",
+      "site": "https://www.hsbcjt.cn/"
+    },
+    "80091787": {
+      "name": "浦银基金",
+      "site": "https://www.py-axa.com/"
+    },
+    "80145102": {
+      "name": "东方红资产管理",
+      "site": "https://www.dfham.com/"
+    },
+    "80147736": {
+      "name": "西部利得基金",
+      "site": "https://www.westleadfund.com/"
+    },
+    "80156175": {
+      "name": "国泰海通资管",
+      "site": "https://www.gthtzg.com/"
+    },
+    "80168726": {
+      "name": "平安基金",
+      "site": "https://fund.pingan.com/"
+    },
+    "80280395": {
+      "name": "兴业基金",
+      "site": "https://www.cib-fund.com.cn/"
+    },
+    "80356155": {
+      "name": "永赢基金",
+      "site": "https://www.maxwealthfund.com/"
+    },
+    "80380794": {
+      "name": "创金合信基金",
+      "site": "https://www.cjhxfund.com/"
+    },
+    "80391977": {
+      "name": "华泰证券(上海)资产管理",
+      "site": "https://www.htscamc.com/"
+    }
+  }
+}

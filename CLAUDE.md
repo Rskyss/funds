@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概览
 
-QDII 基金罗盘：本地运行的 QDII 基金查询/筛选/对比/AI 点评/聊天 Agent 的 Web 应用。当前版本 **1.7.4**（1.6 引入 BYOK 用户自带百炼 Key；1.7 筛选多选/同类内评分；1.7.1 安全加固与工程补全；1.7.3 线上体检修复：东财接口连通、无数据不评分、持仓 30 天缓存、数据库瞬时错误重试、数据完整性告警；1.7.4 净值停更基金标注与沉底、无日期净值当缺失）：
+QDII 基金罗盘：本地运行的 QDII 基金查询/筛选/对比/AI 点评/聊天 Agent 的 Web 应用。当前版本 **1.8.0**（1.6 引入 BYOK 用户自带百炼 Key；1.7 筛选多选/同类内评分；1.7.1 安全加固与工程补全；1.7.3 线上体检修复：东财接口连通、无数据不评分、持仓 30 天缓存、数据库瞬时错误重试、数据完整性告警；1.7.4 净值停更基金标注与沉底、无日期净值当缺失；1.8.0 详情页「去哪里买」购买引导）：
 
 - 前端：Vite + React 18，源码在 `frontend/`，`npm run build` 产出到 `public/`
 - 后端：Node 原生 HTTP 服务（`server.mjs`），无框架
@@ -31,7 +31,7 @@ npm run dev
 # 数据回填 / 刷新
 npm run data:refresh                     # 定时刷新基金列表
 npm run data:spark                       # 回填列表迷你净值曲线（funds.spark_json）
-npm run data:f10                         # F10 投资目标/范围/基准
+npm run data:f10                         # F10 投资目标/范围/基准 + 基金管理人（缺公司字段的会补；结尾打印无官网对照的公司）
 npm run data:metrics                     # 风险收益指标
 npm run data:holdings                    # 持仓
 npm run data:managers                    # 基金经理
@@ -101,6 +101,7 @@ Node http server (server.mjs)
    ├─ lib/navValidation.mjs — 净值行入库校验（非正数/未来日期不入库）
    ├─ lib/retryFetch.mjs    — Supabase 请求瞬时错误（401 issued-at-future / 网关 5xx / 读请求网络瞬断）重试一次
    ├─ lib/dataQuality.mjs   — 关键字段空值统计与告警（刷新日志 + /api/health）
+   ├─ lib/purchaseGuide.mjs — 购买引导「去哪里买」纯函数：申购状态 + 基金公司 → 能否买/文案/渠道链接（天天基金基金页 + 公司官网）；官网对照表 `lib/data/fund-companies.json`（只接受 https）
    └─ lib/agent/*           — 聊天 Agent：planner / session / tools / synth / rules ...
         ↓
 Supabase Postgres + Auth
@@ -108,13 +109,13 @@ Supabase Postgres + Auth
 
 前端 SDK 仅用于登录拿 `access_token`，所有业务读写走自家 `/api/*`，token 由 `Authorization` 头透传给服务端，用 admin client 校验。注册走 `/api/auth/signup` 是为了用 admin API 绕过邮箱验证（`email_confirm: true`）。**注册现在只校验邮箱+密码，开放注册，不再要邀请码**（早期的邀请码校验已移除，`invite_codes` 表与函数仅后台统计/留用）。
 
-**API 面（`server.mjs`）**：`/api/health`（探活：版本/数据更新时间/DB 连通/`dataQuality` 关键字段空值统计，`warn:true` 表示大面积缺失）；业务 `/api/funds`（`?refresh=1` 全量重抓需 `DATA_REFRESH_TOKEN`/后台登录/本机直连，且单飞 + 冷却）、`/api/fund/:code`、`/api/chat?stream=1`（SSE；限流按用户，续写会话校验归属）、`/api/profile`、`/api/profile/ai/validate`（BYOK 存 Key 前校验）、`/api/favorites`、`/api/events`（前端 `track.js` 匿名埋点上报）；`POST /api/fund/:code/ai-summary`（用平台 Key 覆盖共享点评）仅限后台管理员；后台 `/api/admin/*`（login/verify/stats/behavior/users/invites/chats，用内存 token + `ADMIN_PASSWORD`）。登录/注册/后台登录/Key 校验/点评重生成/埋点/经理页代理都有限流；未预期异常只返回通用文案 + requestId，细节在服务端日志。
+**API 面（`server.mjs`）**：`/api/health`（探活：版本/数据更新时间/DB 连通/`dataQuality` 关键字段空值统计，`warn:true` 表示大面积缺失）；业务 `/api/funds`（`?refresh=1` 全量重抓需 `DATA_REFRESH_TOKEN`/后台登录/本机直连，且单飞 + 冷却）、`/api/fund/:code`（含 `purchaseGuide` 购买引导）、`/api/chat?stream=1`（SSE；限流按用户，续写会话校验归属）、`/api/profile`、`/api/profile/ai/validate`（BYOK 存 Key 前校验）、`/api/favorites`、`/api/events`（前端 `track.js` 匿名埋点上报，类型白名单 page_view/fund_open/search/filter/buy_click）；`POST /api/fund/:code/ai-summary`（用平台 Key 覆盖共享点评）仅限后台管理员；后台 `/api/admin/*`（login/verify/stats/behavior/users/invites/chats，用内存 token + `ADMIN_PASSWORD`）。登录/注册/后台登录/Key 校验/点评重生成/埋点/经理页代理都有限流；未预期异常只返回通用文案 + requestId，细节在服务端日志。
 
 ### 表与 RLS（与代码强绑定）
 
 - `funds`（主键 `code`）：基金主表，列表/卡片所有展示字段都从这里来；`upsertFunds` 按 `code` 冲突合并；新增 `spark_json` 字段存列表迷你净值曲线（降采样）
 - `nav_history`：净值历史，唯一键 `(code, nav_date)`，每次刷新追加当日快照
-- `fund_details`：F10 投资目标/范围/基准缓存（首次访问时按需抓取并落库）
+- `fund_details`：F10 投资目标/范围/基准缓存（首次访问时按需抓取并落库）；`company_id`/`company_name` 为基金管理人（东财公司 id + 名称，购买引导查官网对照表用，1.8 新增）
 - `fund_ai_summary`：AI 点评缓存（主键 `code`），与 funds 1:1
 - `favorites`：唯一键 `(user_id, code)`，**开 RLS**（`auth.uid() = user_id`）
 - `user_profile`（**单数**，注意别写成 `user_profiles`）：用户画像（含 `fund_years` 等）；BYOK 列 `ai_api_key_cipher`（加密后的用户百炼 Key）/ `ai_chat_model` / `ai_review_model`
@@ -129,6 +130,7 @@ Supabase Postgres + Auth
 
 - `lib/eastmoney.mjs` 解析东方财富私有格式：基金排行接口（完整收益数据）+ 基金代码库（兜底，让没上排行的 QDII 也出现）。排行接口用 `vm.runInNewContext` 解 `var rankData = {...}`；要换数据源先看 `parseRankData` 和 `fetchQdiiUniverse`。所有 fetch 走 `lib/fetchTimeout.mjs`；抓取失败一律**抛错**（不再返回空值，否则脚本会把空结果连同 `*_fetched_at` 一起落库、之后永久跳过）；`parseFundRow` 字段数不足返回 null，整批解析失败中止刷新。
 - `classifyFund(name)` 是纯字符串关键词规则，给基金打 `region/theme/fundType/role/risk` 五标签，改了要重刷数据才会重算落库。评分为**同主题内**百分位（`applyPercentileScores` 按 `theme` 分组，附 `peerRank`/`peerCount`；不足 6 只标"同类样本少"；净值日期比全站最新落后 14 天以上的基金由 `lib/dataQuality.mjs markStaleNav` 标 `navStaleDays`，不打分、标"净值停更"、列表沉底、AI 筛选剔除，读取时现算不落库），服务读库时实时重算，改公式重启即生效、无需重刷数据；纯函数单测在 `tests/score.test.mjs`（`node --test tests/*.test.mjs`）。
+- 购买引导（1.8）：本站**不销售基金**，页面只叫「去哪里买」+ 免责声明，不出现「购买/立即买入」；外链只可能来自 `ttfundUrl(code)` 模板或对照表里的 https 地址；暂停/封闭时按钮置灰；新基金公司出现时 `npm run data:f10` 结尾会列出缺对照的公司，补进 `lib/data/fund-companies.json` 后重启服务（表在进程内缓存）。
 - `buildStructuredAnalysis` 输出结构化分析对象给详情抽屉用，**不走 AI**；AI 点评（一句话）由 `lib/ai.mjs` 生成、单独存 `fund_ai_summary` 表。
 - `loadOrRefresh` 是兜底加载：DB 没数据时自动抓一次；用户主动刷新需要 `?refresh=1`。
 - `lib/dataSchedule.mjs` 在服务启动时自检：数据早于最近 `DATA_UPDATE_TIME` 批次会后台补刷。所有全量刷新都经 `server.mjs` 的 `runRefreshOnce()` 单飞（并发触发共用一个 Promise）。线上每日 07:00 由服务器 root crontab 调 `scripts/scheduled-refresh.mjs`（带 flock），日志在 `/www/wwwroot/funds/logs/data-refresh.log`。
